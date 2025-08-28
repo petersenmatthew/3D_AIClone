@@ -14,7 +14,12 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "3D AI Matthew Chatbot",
   description: "Talk to a 3D AI Model of Me!",
+  icons: {
+    icon: "/favicon.png",      // default favicon
+    apple: "/favicon.png", // optional Apple icon
+  },
 };
+
 
 export default function RootLayout({ children }) {
   return (
