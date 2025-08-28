@@ -1,0 +1,23 @@
+export const voices = {
+    en: "en-CA-LiamNeural",     // English (Canada)
+    fr: "fr-CA-AntoineNeural",  // French (Canada)
+    es: "es-ES-AlvaroNeural",   // Spanish (Spain)
+    de: "de-DE-ConradNeural",   // German (Germany)
+    it: "it-IT-DiegoNeural",    // Italian (Italy)
+    pt: "pt-BR-AntonioNeural",  // Portuguese (Brazil)
+    nl: "nl-NL-MaartenNeural",  // Dutch (Netherlands)
+    sv: "sv-SE-MattiasNeural",  // Swedish (Sweden)
+    da: "da-DK-JeppeNeural",    // Danish (Denmark)
+    no: "nb-NO-FinnNeural",     // Norwegian Bokmål (Norway)
+    fi: "fi-FI-HarriNeural",    // Finnish (Finland)
+    pl: "pl-PL-MarekNeural",    // Polish (Poland)
+    ru: "ru-RU-DmitryNeural",   // Russian (Russia)
+    tr: "tr-TR-AhmetNeural",    // Turkish (Turkey)
+    ar: "ar-SA-HamedNeural",    // Arabic (Saudi Arabia)
+    hi: "hi-IN-MadhurNeural",   // Hindi (India)
+    ja: "ja-JP-KeitaNeural",    // Japanese (Japan)
+    ko: "ko-KR-InJoonNeural",   // Korean (South Korea)
+    zh: "zh-CN-YunxiNeural",    // Chinese (Mandarin, Mainland China)
+    ct: "zh-HK-WanLungNeural"   // Chinese (Cantonese, Hong Kong)
+  };
+  
