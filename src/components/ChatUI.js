@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import TalkingHeadDemo from "./TalkingHeadDemo";
 import DOMPurify from "dompurify";
 import { voices } from "../utils/voices.js";
@@ -23,11 +23,31 @@ export default function ChatUI() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [currentMessageHTML, setCurrentMessageHTML] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const talkingHeadRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (chatContainerRef.current && messagesEndRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+
   const handleSend = async () => {
     const userMessage = input.trim();
-    if (!userMessage) return;
+    if (!userMessage || isGenerating) return;
   
+    // Set generating state
+    console.log("Setting generating state to true");
+    setIsGenerating(true);
+    
     // Add current user message locally
     setMessages(prev => [...prev, { role: "user", text: userMessage }]);
     setInput("");
@@ -79,70 +99,220 @@ export default function ChatUI() {
       { role: "Matthew", text: "", isBuilding: true }
     ]);
   
+    // Start TTS
     talkingHeadRef.current?.speak(
       cleanMessage,
       voices[langCode] || voices["en"]
     );
   };
+
+  // Simple Speech-to-Text functionality
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 44100,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      
+      // Try different MIME types in order of preference
+      let mimeType = 'audio/webm;codecs=opus';
+      if (MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/wav';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      }
+      
+      console.log('Using mime type:', mimeType);
+      
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setIsListening(true);
+      
+      let audioChunks = [];
+      audioChunksRef.current = audioChunks;
+      
+      recorder.ondataavailable = (event) => {
+        audioChunks.push(event.data);
+      };
+      
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: mimeType });
+        console.log('Audio blob size:', audioBlob.size, 'bytes');
+        console.log('Audio blob type:', audioBlob.type);
+        
+        const audioData = await audioBlob.arrayBuffer();
+        
+        try {
+          const response = await fetch('/api/azure-stt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              audioData: Array.from(new Uint8Array(audioData)),
+              mimeType: mimeType
+            })
+          });
+          const data = await response.json();
+          console.log('STT response:', data);
+          
+          if (data.text) {
+            setInput(prev => prev + (prev ? ' ' : '') + data.text);
+          } else if (data.error) {
+            console.error('STT error:', data.error);
+            alert(`Speech recognition error: ${data.error}`);
+          }
+        } catch (error) {
+          console.error('Speech recognition error:', error);
+          alert(`Speech recognition error: ${error.message}`);
+        }
+        
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecording(false);
+        setIsListening(false);
+      };
+      
+      recorder.start();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      alert('Error accessing microphone. Please check your permissions.');
+      setIsRecording(false);
+      setIsListening(false);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setIsListening(false);
+    }
+  };
   
   
   return (
-    <div className="p-4 max-w-2xl mx-auto">
-      <div className="border p-2 h-64 overflow-y-auto mb-2">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={msg.role === "user" ? "text-blue-500" : "text-green-500"}
-          >
-            <b>{msg.role}:</b>{" "}
-            <span
-              className="whitespace-pre-wrap"
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(msg.text, {
-                  ALLOWED_TAGS: ["b", "i", "em", "strong", "a", "u"],
-                  ALLOWED_ATTR: ["href", "target", "rel", "style"],
-                }),
+    <div className="min-h-screen bg-black text-white font-mono">
+      <div className="flex flex-col lg:flex-row h-screen">
+        {/* Chat Interface - Full width on mobile, half width on desktop */}
+        <div className="w-full lg:w-1/2 flex flex-col p-4 lg:p-8 lg:border-r border-gray-700 order-2 lg:order-2">
+          <div className={`border border-gray-600 rounded-lg p-4 bg-gray-900/30 backdrop-blur-sm flex flex-col max-h-[50vh] lg:max-h-[70vh] ${messages.length === 0 ? 'lg:h-auto' : ''}`}>
+              <div ref={chatContainerRef} className="space-y-3 flex-1 overflow-y-auto min-h-0">
+              {messages.map((msg, i) => (
+                <div key={i} className={`flex items-baseline space-x-1 ${
+                  msg.role === "user" 
+                    ? "p-3 rounded-lg bg-gray-800 border border-gray-700" 
+                    : "pl-2"  // Add left padding for AI responses
+                }`}>
+                  {msg.role === "user" ? (
+                    <>
+                      <span className="text-blue-400 font-mono flex-shrink-0">&gt;</span>
+                      <p className="text-white whitespace-pre-wrap text-sm lg:text-base leading-tight">{msg.text}</p>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-green-400 flex-shrink-0">●</span>
+                      <div
+                        className="text-gray-200 whitespace-pre-wrap text-sm lg:text-base leading-tight pl-0"
+                        dangerouslySetInnerHTML={{
+                          __html: DOMPurify.sanitize(msg.text, {
+                            ALLOWED_TAGS: ["b", "i", "em", "strong", "a", "u"],
+                            ALLOWED_ATTR: ["href", "target", "rel", "style"],
+                          }),
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+              </div>
+
+              <div className="flex items-center space-x-2 mt-2 lg:mt-0">
+                <span className="text-gray-400 font-mono">&gt;</span>
+                <input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  className="bg-transparent border-none outline-none text-white flex-1 placeholder-gray-500 text-sm lg:text-base"
+                  placeholder="Type your message here"
+                  onKeyPress={e => e.key === 'Enter' && !isGenerating && handleSend()}
+                />
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={isGenerating}
+                  className={`p-2 rounded-full transition-colors duration-200 group ${
+                    isRecording 
+                      ? 'bg-red-500 hover:bg-red-600' 
+                      : 'bg-gray-800 hover:bg-gray-700'
+                  } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={isRecording ? 'Stop recording' : 'Start recording'}
+                >
+                  {isRecording ? (
+                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2"/>
+                    </svg>
+                  ) : (
+                    <svg 
+                      className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors duration-200" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        strokeWidth={2} 
+                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" 
+                      />
+                    </svg>
+                  )}
+                </button>
+                {isGenerating && (
+                  <span className="text-gray-400 text-xs lg:text-sm">Generating...</span>
+                )}
+                {isListening && (
+                  <span className="text-red-400 text-xs lg:text-sm animate-pulse">Listening...</span>
+                )}
+              </div>
+            </div>
+        </div>
+
+        {/* AI Avatar - Full width on mobile, half width on desktop */}
+         <div className="w-full lg:w-1/2 flex flex-col items-center justify-start pt-4 pb-4 px-4 lg:px-8 order-1 lg:order-1">
+          <div className="mb-2 lg:mb-3 text-center">
+            <h1 className="text-2xl lg:text-4xl font-bold mb-1 lg:mb-2">Hey, I&apos;m Matthew!</h1>
+            <p className="text-gray-300 text-sm lg:text-base">I&apos;m a virtual 3D AI Clone. Ask me anything!</p>
+          </div>
+          
+          <div className="w-full max-w-2xl">
+            <TalkingHeadDemo
+              ref={talkingHeadRef}
+              onWord={(word, i, info) => {
+                console.log("onWord called:", { word, i, info, isLastWord: info?.isLastWord });
+                setMessages(prev => {
+                  const last = prev[prev.length - 1];
+                  if (last && last.isBuilding) {
+                    const newText = appendToken(last?.text || "", word);
+
+                    // ✅ Convert phrases live
+                    const linkedText = convertPhrasesToLinks(newText);
+
+                    // If this is the last word, mark as complete and reset generating state
+                    if (info?.isLastWord) {
+                      console.log("Last word detected, resetting generating state");
+                      setIsGenerating(false);
+                    }
+
+                    return [...prev.slice(0, -1), { role: "Matthew", text: linkedText, isBuilding: !info?.isLastWord }];
+                  }
+                  return prev;
+                });
               }}
             />
           </div>
-        ))}
-      </div>
-
-      <div className="flex gap-2">
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          className="border p-2 flex-1"
-          placeholder="Type your message..."
-          onKeyPress={e => e.key === 'Enter' && handleSend()}
-        />
-        <button
-          onClick={handleSend}
-          className="bg-blue-600 text-white px-4 rounded"
-        >
-          Send
-        </button>
-      </div>
-
-      <div className="mt-4">
-        <TalkingHeadDemo
-          ref={talkingHeadRef}
-          onWord={(word, i, info) => {
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.isBuilding) {
-                const newText = appendToken(last?.text || "", word);
-
-                // ✅ Convert phrases live
-                const linkedText = convertPhrasesToLinks(newText);
-
-                return [...prev.slice(0, -1), { role: "Matthew", text: linkedText, isBuilding: !info?.isLastWord }];
-              }
-              return prev;
-            });
-          }}
-        />
-
+        </div>
       </div>
     </div>
   );

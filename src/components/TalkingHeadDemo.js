@@ -45,7 +45,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         if (props.onWord) {
           words.forEach((word, i) => {
             setTimeout(() => {
-              props.onWord(word, i);
+              props.onWord(word, i, { isLastWord: i === words.length - 1 });
             }, wtimes[i]); // already in ms
           });
         }
@@ -84,6 +84,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           lipsyncLang: 'en',
           cameraView: 'upper',           // 'full', 'mid', 'upper', 'head'
           cameraRotateX: 0.6,
+          cameraY: 0.5,       // Move camera down
           cameraRotateEnable: true,     // allow user rotation
           cameraPanEnable: true,       // allow user panning
           cameraZoomEnable: true,      // allow user zooming
@@ -139,7 +140,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
   };
 
   return (
-    <div ref={avatarRef} className="w-full max-w-4xl h-[70vh] bg-gray-100 rounded-lg mx-auto" />
+    <div ref={avatarRef} className="w-full max-w-4xl h-[60vh] mx-auto" />
   );
 });
 
