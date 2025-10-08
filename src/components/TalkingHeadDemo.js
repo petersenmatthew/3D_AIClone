@@ -7,17 +7,21 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Expose `speak(text, voice)` to parent via ref
+  // Expose `speak(textOrObj, voice)` to parent via ref
   useImperativeHandle(ref, () => ({
-    speak: async (text, voice = 'en-CA-LiamNeural') => {
+    speak: async (textOrObj, voice = 'en-CA-LiamNeural') => {
       if (!isInitialized || isPlaying) return;
       setIsPlaying(true);
 
       try {
+        // Accept either a plain text string, or { message, voice }
+        const text = typeof textOrObj === 'string' ? textOrObj : (textOrObj?.message || '');
+        const overrideVoice = typeof textOrObj === 'object' && textOrObj?.voice ? textOrObj.voice : voice;
+
         const res = await fetch("/api/azure-tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice }),
+          body: JSON.stringify({ text, voice: overrideVoice }),
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -96,6 +100,12 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
 
         });
 
+        // Expose instance for debugging
+        if (typeof window !== 'undefined') {
+          window.th = head;
+          console.log('[TalkingHeadDemo] TalkingHead instance ready as window.th');
+        }
+
         
 
         headRef.current = head;
@@ -109,6 +119,15 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           lipsyncLang: 'en'
         });
         
+        // Force a pose change shortly after load to trigger logging in setPoseFromTemplate
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            try {
+              console.log('[TalkingHeadDemo] Forcing pose change to ...');
+              head.setPoseFromTemplate(head.poseTemplates.straight, 800);
+            } catch(e) {}
+          }, 1500);
+        }
 
         setIsInitialized(true);
 

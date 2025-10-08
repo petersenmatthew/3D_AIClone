@@ -5,7 +5,6 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const query = body.query;
-    const language = body.language || "en";
     const messages = body.messages || []; // last 3 messages sent from frontend
 
     if (!query) {
@@ -66,9 +65,41 @@ export async function POST(request) {
     }
 
     const data = await response.json();
-    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
+    let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "{\"language\":\"en\",\"message\":\"Sorry, I couldn't generate a response.\"}";
 
-    return NextResponse.json({ response: aiText });
+    // Strip code fences if present
+    raw = raw.replace(/^```[a-zA-Z]*\s*/m, '').replace(/```\s*$/m, '');
+
+    // Extract the JSON object if extra text surrounds it
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+    const jsonSegment = (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace)
+      ? raw.slice(firstBrace, lastBrace + 1)
+      : raw;
+
+    // Try to parse JSON per userContext; if parse fails, fall back to default
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonSegment.trim());
+    } catch {
+      parsed = { language: "en", message: raw };
+    }
+
+    // Normalize keys and values (trim spaces around keys/values like "language ")
+    const normalized = {};
+    Object.entries(parsed || {}).forEach(([k, v]) => {
+      const key = String(k).trim().toLowerCase();
+      normalized[key] = (typeof v === 'string') ? v.trim() : v;
+    });
+
+    // Resolve fields
+    let language = (normalized.language || 'en').toString().toLowerCase();
+    // Reduce to 2 letters when longer (keep 'ct' exception as-is)
+    if (language.length > 2) language = language.slice(0,2);
+    let message = normalized.message || "Sorry, I couldn't generate a response.";
+
+    // Return structured payload
+    return NextResponse.json({ response: message, language });
   } catch (error) {
     console.error("Error in AI route:", error);
     return NextResponse.json({ error: "Failed to generate AI response", details: error instanceof Error ? error.message : String(error) }, { status: 500 });

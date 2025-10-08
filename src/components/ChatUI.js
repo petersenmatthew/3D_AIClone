@@ -80,15 +80,11 @@ export default function ChatUI() {
     });
   
     const data = await res.json();
-    const botMessage = data.response || "Sorry, I couldn't think of a reply.";
-  
-    // Determine language code dynamically for TTS
-    const langCode = Object.keys(voices).includes(botMessage.slice(0, 2))
-      ? botMessage.slice(0, 2)
+    console.log("Chat /api/chat JSON:", data);
+    const cleanMessage = data.response || "Sorry, I couldn't think of a reply.";
+    const langCode = data.language && Object.keys(voices).includes(data.language)
+      ? data.language
       : "en";
-  
-    // Remove potential language prefix for clean display
-    const cleanMessage = botMessage.slice(3);
   
     const linkedMessage = convertPhrasesToLinks(cleanMessage);
     setCurrentMessageHTML(linkedMessage);
@@ -290,7 +286,6 @@ export default function ChatUI() {
             <TalkingHeadDemo
               ref={talkingHeadRef}
               onWord={(word, i, info) => {
-                console.log("onWord called:", { word, i, info, isLastWord: info?.isLastWord });
                 setMessages(prev => {
                   const last = prev[prev.length - 1];
                   if (last && last.isBuilding) {
@@ -301,7 +296,6 @@ export default function ChatUI() {
 
                     // If this is the last word, mark as complete and reset generating state
                     if (info?.isLastWord) {
-                      console.log("Last word detected, resetting generating state");
                       setIsGenerating(false);
                     }
 
