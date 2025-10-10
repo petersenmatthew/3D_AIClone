@@ -106,29 +106,35 @@ export default function ChatUI() {
     );
   };
 
-  // Simple Speech-to-Text functionality
+  // Server-side Speech-to-Text functionality using existing Azure API
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
-          sampleRate: 44100,
+          sampleRate: 16000, // Azure prefers 16kHz
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true
         }
       });
       
-      // Try different MIME types in order of preference
-      let mimeType = 'audio/webm;codecs=opus';
-      if (MediaRecorder.isTypeSupported('audio/wav')) {
-        mimeType = 'audio/wav';
-      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-        mimeType = 'audio/webm';
+      // Audio level monitoring (removed excessive logging)
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const microphone = audioContext.createMediaStreamSource(stream);
+      microphone.connect(analyser);
+      
+      // Use WebM with Opus codec for better compatibility
+      const mimeType = 'audio/webm;codecs=opus';
+      
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        throw new Error('WebM with Opus codec not supported by this browser');
       }
       
-      console.log('Using mime type:', mimeType);
-      
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const recorder = new MediaRecorder(stream, { 
+        mimeType,
+        audioBitsPerSecond: 16000 // Lower bitrate for better performance
+      });
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setIsListening(true);
@@ -137,17 +143,21 @@ export default function ChatUI() {
       audioChunksRef.current = audioChunks;
       
       recorder.ondataavailable = (event) => {
-        audioChunks.push(event.data);
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
       };
       
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks, { type: mimeType });
-        console.log('Audio blob size:', audioBlob.size, 'bytes');
-        console.log('Audio blob type:', audioBlob.type);
-        
-        const audioData = await audioBlob.arrayBuffer();
-        
         try {
+          const audioBlob = new Blob(audioChunks, { type: mimeType });
+          
+          if (audioBlob.size === 0) {
+            throw new Error('No audio data recorded');
+          }
+          
+          const audioData = await audioBlob.arrayBuffer();
+          
           const response = await fetch('/api/azure-stt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -156,29 +166,40 @@ export default function ChatUI() {
               mimeType: mimeType
             })
           });
-          const data = await response.json();
-          console.log('STT response:', data);
           
-          if (data.text) {
-            setInput(prev => prev + (prev ? ' ' : '') + data.text);
+          const data = await response.json();
+          
+          if (data.text && data.text.trim()) {
+            setInput(prev => prev + (prev ? ' ' : '') + data.text.trim());
           } else if (data.error) {
             console.error('STT error:', data.error);
             alert(`Speech recognition error: ${data.error}`);
           }
+          // No alert for no speech detected - just silently continue
         } catch (error) {
           console.error('Speech recognition error:', error);
           alert(`Speech recognition error: ${error.message}`);
+        } finally {
+          stream.getTracks().forEach(track => track.stop());
+          setIsRecording(false);
+          setIsListening(false);
         }
-        
+      };
+      
+      recorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event.error);
+        alert(`Recording error: ${event.error.message}`);
         stream.getTracks().forEach(track => track.stop());
         setIsRecording(false);
         setIsListening(false);
       };
       
-      recorder.start();
+      // Start recording
+      recorder.start(1000); // Collect data every second
+      
     } catch (error) {
       console.error('Error accessing microphone:', error);
-      alert('Error accessing microphone. Please check your permissions.');
+      alert(`Error accessing microphone: ${error.message}`);
       setIsRecording(false);
       setIsListening(false);
     }
@@ -191,6 +212,7 @@ export default function ChatUI() {
       setIsListening(false);
     }
   };
+
   
   
   return (

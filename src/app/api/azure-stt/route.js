@@ -3,8 +3,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 
 // Helper function to create WAV file header
-function createWavHeader(dataLength) {
-  const sampleRate = 44100; // Use 44.1kHz instead of 16kHz
+function createWavHeader(dataLength, sampleRate = 16000) {
   const numChannels = 1;
   const bitsPerSample = 16;
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
@@ -37,16 +36,10 @@ function createWavHeader(dataLength) {
 
 export async function POST(req) {
   try {
-    console.log('STT API called');
     const { audioData, mimeType } = await req.json();
-    console.log('Audio data received:', audioData ? 'Yes' : 'No', audioData?.length || 0, 'bytes');
-    console.log('MIME type:', mimeType);
 
     const subscriptionKey = process.env.AZURE_SPEECH_KEY;
     const region = process.env.AZURE_SPEECH_REGION || 'eastus';
-
-    console.log('Azure key exists:', !!subscriptionKey);
-    console.log('Azure region:', region);
 
     if (!subscriptionKey) {
       throw new Error('Azure key not configured on server.');
@@ -58,54 +51,71 @@ export async function POST(req) {
 
     // Convert array to buffer
     const audioBuffer = Buffer.from(audioData);
-    console.log('Audio buffer size:', audioBuffer.length, 'bytes');
 
-    let wavBuffer;
+    // Create multipart form data manually
+    const boundary = '----formdata-' + Math.random().toString(36).substring(2);
     
-    if (mimeType === 'audio/wav') {
-      // If it's already WAV, use as-is
-      wavBuffer = audioBuffer;
-      console.log('Using audio as-is (WAV format)');
-    } else {
-      // For other formats, create WAV header
-      const wavHeader = createWavHeader(audioBuffer.length);
-      wavBuffer = Buffer.concat([wavHeader, audioBuffer]);
-      console.log('WAV file size:', wavBuffer.length, 'bytes');
-    }
+    let formData = '';
+    
+    // Add the definition part
+    formData += `--${boundary}\r\n`;
+    formData += `Content-Disposition: form-data; name="definition"\r\n`;
+    formData += `Content-Type: application/json\r\n\r\n`;
+    formData += JSON.stringify({ locales: ['en-US'] }) + '\r\n';
+    
+    // Add the audio part
+    formData += `--${boundary}\r\n`;
+    formData += `Content-Disposition: form-data; name="audio"; filename="audio.webm"\r\n`;
+    formData += `Content-Type: ${mimeType}\r\n\r\n`;
+    
+    // Convert form data string to buffer and append audio buffer
+    const formDataBuffer = Buffer.concat([
+      Buffer.from(formData, 'utf8'),
+      audioBuffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')
+    ]);
 
-    const speechApiUrl = `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US&format=simple`;
+    const fastTranscriptionUrl = `https://${region}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2024-11-15`;
     
-    const response = await fetch(speechApiUrl, {
+    const response = await fetch(fastTranscriptionUrl, {
       method: 'POST',
       headers: {
         'Ocp-Apim-Subscription-Key': subscriptionKey,
-        'Content-Type': 'audio/wav; codecs=audio/pcm; samplerate=44100',
-        'Accept': 'application/json',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': formDataBuffer.length.toString(),
       },
-      body: wavBuffer,
+      body: formDataBuffer,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Azure API error:', response.status, errorText);
-      throw new Error(`Azure API error: ${response.status} - ${errorText}`);
+      console.error('Azure Fast Transcription API error:', response.status, errorText);
+      throw new Error(`Azure Fast Transcription API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('Azure API response:', data);
 
-    if (data.RecognitionStatus === 'Success' && data.DisplayText && data.DisplayText.trim()) {
-      return NextResponse.json({ text: data.DisplayText });
-    } else if (data.RecognitionStatus === 'Success' && (!data.DisplayText || !data.DisplayText.trim())) {
-      throw new Error('Audio was processed but no speech was detected. Please try speaking more clearly.');
-    } else if (data.RecognitionStatus === 'NoMatch') {
-      throw new Error('No speech could be recognized in the audio');
-    } else {
-      console.error('Azure recognition failed:', data);
-      throw new Error(`Speech recognition failed: ${data.RecognitionStatus || 'Unknown error'}`);
+    // Extract text from the response
+    if (data.combinedPhrases && data.combinedPhrases.length > 0) {
+      const combinedText = data.combinedPhrases[0].text;
+      if (combinedText && combinedText.trim()) {
+        return NextResponse.json({ text: combinedText.trim() });
+      }
     }
+
+    // If no combined phrases, check individual phrases
+    if (data.phrases && data.phrases.length > 0) {
+      const phrases = data.phrases.map(phrase => phrase.text).join(' ');
+      if (phrases && phrases.trim()) {
+        return NextResponse.json({ text: phrases.trim() });
+      }
+    }
+
+    // No speech detected - return empty text instead of error
+    return NextResponse.json({ text: '' });
+
   } catch (err) {
-    console.error('STT API error:', err);
+    console.error('Fast Transcription API error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
