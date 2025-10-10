@@ -154,21 +154,47 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     return () => headRef.current?.stop();
   }, []);
 
-  const convertVisemesToOculus = visemes => {
-    const visemeToOculusMap = {
-      0: 'sil', 1: 'PP', 2: 'FF', 3: 'TH', 4: 'DD', 5: 'kk', 6: 'CH',
-      7: 'SS', 8: 'nn', 9: 'RR', 10: 'aa', 11: 'E', 12: 'I', 13: 'O', 14: 'U',
-      15: 'PP', 16: 'aa', 17: 'E', 18: 'I', 19: 'O', 20: 'U', 21: 'sil'
-    };
-    const convertedVisemes = visemes.map(v => visemeToOculusMap[v.visemeId] || 'sil');
-    const times = visemes.map(v => v.audioOffset / 10000);
-    const durations = visemes.map((v, i) =>
-      i < visemes.length - 1
-        ? (visemes[i + 1].audioOffset - v.audioOffset) / 10000
-        : 100
-    );
-    return { visemes: convertedVisemes, times, durations };
-  };
+      const convertVisemesToOculus = visemes => {
+        // Use the more accurate mapping from TalkingHead website
+        const visemeMap = [
+          "sil", 'aa', 'aa', 'O', 'E',     // 0 - 4
+          'E', 'I', 'U', 'O', 'aa',        // 5 - 9
+          'O', 'I', 'kk', 'RR', 'nn',      // 10 - 14
+          'SS', 'SS', 'TH', 'FF', 'DD',    // 15 - 19
+          'kk', 'PP'                       // 20 - 21
+        ];
+
+        const convertedVisemes = [];
+        const times = [];
+        const durations = [];
+
+        for (let i = 0; i < visemes.length; i++) {
+          const viseme = visemeMap[visemes[i].visemeId] || 'sil';
+          const time = visemes[i].audioOffset / 10000;
+
+          // Skip silence at the beginning
+          if (convertedVisemes.length === 0 && viseme === 'sil') {
+            continue;
+          }
+
+          // Calculate duration dynamically
+          if (convertedVisemes.length > 0) {
+            const prevTime = times[times.length - 1];
+            durations[durations.length - 1] = time - prevTime;
+          }
+
+          convertedVisemes.push(viseme);
+          times.push(time);
+          durations.push(75); // Will be fixed on next iteration
+        }
+
+        // Fix the last duration
+        if (durations.length > 0) {
+          durations[durations.length - 1] = 100; // Default duration for last viseme
+        }
+
+        return { visemes: convertedVisemes, times, durations };
+      };
 
   return (
     <div ref={avatarRef} className="w-full max-w-4xl h-[60vh] mx-auto" />
