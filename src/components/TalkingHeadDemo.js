@@ -7,9 +7,9 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Expose `speak(textOrObj, voice)` to parent via ref
+  // Expose `speak(textOrObj, voice, provider)` to parent via ref
   useImperativeHandle(ref, () => ({
-    speak: async (textOrObj, voice = 'en-CA-LiamNeural') => {
+    speak: async (textOrObj, voice = 'en-CA-LiamNeural', provider = 'azure') => {
       if (!isInitialized || isPlaying) return;
       setIsPlaying(true);
 
@@ -18,11 +18,21 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         const text = typeof textOrObj === 'string' ? textOrObj : (textOrObj?.message || '');
         const overrideVoice = typeof textOrObj === 'object' && textOrObj?.voice ? textOrObj.voice : voice;
 
-        const res = await fetch("/api/azure-tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice: overrideVoice }),
-        });
+        let res;
+        if (provider === 'elevenlabs') {
+          res = await fetch("/api/elevenlabs-tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, voiceId: overrideVoice }),
+          });
+        } else {
+          res = await fetch("/api/azure-tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, voice: overrideVoice }),
+          });
+        }
+        
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
@@ -30,11 +40,13 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioBuffer = await audioContext.decodeAudioData(audioBytes.buffer);
 
-        const processedVisemes = convertAzureVisemesToOculus(data.visemes);
+        const processedVisemes = convertVisemesToOculus(data.visemes);
+        
         const words = data.words.map(w => w.text);
         const wtimes = data.words.map(w => w.audioOffset / 10000);
         const wdurations = data.words.map(w => w.duration / 10000);
 
+        // Use the real timing data from ElevenLabs WebSocket
         headRef.current.speakAudio({
           audio: audioBuffer,
           words,
@@ -50,7 +62,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           words.forEach((word, i) => {
             setTimeout(() => {
               props.onWord(word, i, { isLastWord: i === words.length - 1 });
-            }, wtimes[i]); // already in ms
+            }, wtimes[i]); // use real timing from ElevenLabs
           });
         }
       } catch (err) {
@@ -142,20 +154,20 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     return () => headRef.current?.stop();
   }, []);
 
-  const convertAzureVisemesToOculus = azureVisemes => {
-    const azureToOculusMap = {
+  const convertVisemesToOculus = visemes => {
+    const visemeToOculusMap = {
       0: 'sil', 1: 'PP', 2: 'FF', 3: 'TH', 4: 'DD', 5: 'kk', 6: 'CH',
       7: 'SS', 8: 'nn', 9: 'RR', 10: 'aa', 11: 'E', 12: 'I', 13: 'O', 14: 'U',
       15: 'PP', 16: 'aa', 17: 'E', 18: 'I', 19: 'O', 20: 'U', 21: 'sil'
     };
-    const visemes = azureVisemes.map(v => azureToOculusMap[v.visemeId] || 'sil');
-    const times = azureVisemes.map(v => v.audioOffset / 10000);
-    const durations = azureVisemes.map((v, i) =>
-      i < azureVisemes.length - 1
-        ? (azureVisemes[i + 1].audioOffset - v.audioOffset) / 10000
+    const convertedVisemes = visemes.map(v => visemeToOculusMap[v.visemeId] || 'sil');
+    const times = visemes.map(v => v.audioOffset / 10000);
+    const durations = visemes.map((v, i) =>
+      i < visemes.length - 1
+        ? (visemes[i + 1].audioOffset - v.audioOffset) / 10000
         : 100
     );
-    return { visemes, times, durations };
+    return { visemes: convertedVisemes, times, durations };
   };
 
   return (

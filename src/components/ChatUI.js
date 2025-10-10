@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import TalkingHeadDemo from "./TalkingHeadDemo";
 import DOMPurify from "dompurify";
 import { voices } from "../utils/voices.js";
+import { elevenLabsVoices } from "../utils/elevenlabsVoices.js";
 import { convertPhrasesToLinks } from "../utils/linkMappings.js"; 
 // ✅ Helper: append tokens without extra space before punctuation
 function appendToken(existing, token) {
@@ -26,6 +27,7 @@ export default function ChatUI() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [ttsProvider, setTtsProvider] = useState('azure'); // 'azure' or 'elevenlabs'
   const talkingHeadRef = useRef(null);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -96,9 +98,11 @@ export default function ChatUI() {
     ]);
   
     // Start TTS
+    const voiceMapping = ttsProvider === 'elevenlabs' ? elevenLabsVoices : voices;
     talkingHeadRef.current?.speak(
       cleanMessage,
-      voices[langCode] || voices["en"]
+      voiceMapping[langCode] || voiceMapping["en"],
+      ttsProvider
     );
   };
 
@@ -280,6 +284,33 @@ export default function ChatUI() {
           <div className="mb-2 lg:mb-3 text-center">
             <h1 className="text-2xl lg:text-4xl font-bold mb-1 lg:mb-2">Hey, I&apos;m Matthew!</h1>
             <p className="text-gray-300 text-sm lg:text-base">I&apos;m a virtual 3D AI Clone. Ask me anything!</p>
+            
+            {/* TTS Provider Toggle */}
+            <div className="mt-4 flex items-center justify-center space-x-4">
+              <span className="text-gray-400 text-sm">TTS Provider:</span>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setTtsProvider('azure')}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    ttsProvider === 'azure'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Azure
+                </button>
+                <button
+                  onClick={() => setTtsProvider('elevenlabs')}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    ttsProvider === 'elevenlabs'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  ElevenLabs
+                </button>
+              </div>
+            </div>
           </div>
           
           <div className="w-full max-w-2xl">
