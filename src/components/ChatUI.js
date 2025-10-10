@@ -27,12 +27,21 @@ export default function ChatUI() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [ttsProvider, setTtsProvider] = useState('azure'); // 'azure' or 'elevenlabs'
+  const [ttsProvider, setTtsProvider] = useState('elevenlabs'); // 'azure' or 'elevenlabs'
+  const [conversationMode, setConversationMode] = useState(false);
   const talkingHeadRef = useRef(null);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const silenceTimeoutRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const conversationModeRef = useRef(false);
+  const isAvatarSpeakingRef = useRef(false);
+  const voiceDetectionRunningRef = useRef(false);
+  const isGeneratingRef = useRef(false);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -41,18 +50,141 @@ export default function ChatUI() {
     }
   }, [messages]);
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  const handleSend = async () => {
-    const userMessage = input.trim();
-    if (!userMessage || isGenerating) return;
-  
+  // Sync conversation mode ref
+  useEffect(() => {
+    conversationModeRef.current = conversationMode;
+  }, [conversationMode]);
+
+  // Sync generating state ref
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  // Expose TTS provider control to global scope for console commands
+  useEffect(() => {
+    // Expose TTS provider control to global scope for console commands
+    window.setTtsProvider = (provider) => {
+      if (provider === 'azure' || provider === 'elevenlabs') {
+        setTtsProvider(provider);
+        console.log(`TTS Provider switched to: ${provider}`);
+      } else {
+        console.log('Invalid TTS provider. Use "azure" or "elevenlabs"');
+      }
+    };
+    
+    // Expose current provider getter
+    window.getTtsProvider = () => {
+      console.log(`Current TTS Provider: ${ttsProvider}`);
+      return ttsProvider;
+    };
+    
+    // Expose conversation mode control
+    window.toggleConversationMode = () => {
+      setConversationMode(prev => {
+        const newMode = !prev;
+        console.log(`Conversation mode: ${newMode ? 'ON' : 'OFF'}`);
+        return newMode;
+      });
+    };
+    
+    // Cleanup on unmount
+    return () => {
+      delete window.setTtsProvider;
+      delete window.getTtsProvider;
+      delete window.toggleConversationMode;
+    };
+  }, [ttsProvider]);
+
+  // Voice Activity Detection
+  const checkVoiceActivity = () => {
+    console.log('checkVoiceActivity called, analyserRef.current:', !!analyserRef.current, 'isRecordingRef.current:', isRecordingRef.current, 'conversationMode:', conversationModeRef.current, 'isAvatarSpeaking:', isAvatarSpeakingRef.current);
+    
+    if (!analyserRef.current || !isRecordingRef.current || !voiceDetectionRunningRef.current) {
+      console.log('Exiting checkVoiceActivity - no analyser, not recording, or detection stopped');
+      voiceDetectionRunningRef.current = false;
+      return;
+    }
+
+    // In conversation mode, don't detect voice if avatar is speaking
+    if (conversationModeRef.current && isAvatarSpeakingRef.current) {
+      console.log('Avatar is speaking, skipping voice detection');
+      // Continue monitoring but don't process voice
+      if (isRecordingRef.current) {
+        requestAnimationFrame(checkVoiceActivity);
+      }
+      return;
+    }
+
+    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+    analyserRef.current.getByteFrequencyData(dataArray);
+    
+    // Calculate average volume
+    const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+    
+    // Debug logging
+    console.log('Voice activity level:', average);
+    
+    // Threshold for voice detection (lowered for better sensitivity)
+    const voiceThreshold = 5;
+    
+    if (average > voiceThreshold) {
+      // Voice detected - clear any existing timeout
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+        console.log('Voice detected, cleared timeout');
+      }
+    } else {
+      // Silence detected - start timeout if not already started
+      if (!silenceTimeoutRef.current) {
+        console.log('Silence detected, starting timeout');
+        const timeoutDuration = conversationModeRef.current ? 1500 : 2000; // Shorter timeout in conversation mode
+        silenceTimeoutRef.current = setTimeout(() => {
+          // Auto-stop recording after silence
+          console.log('Auto-stopping due to silence');
+          if (isRecordingRef.current) {
+            stopRecording();
+          }
+        }, timeoutDuration);
+      }
+    }
+    
+    // Continue monitoring
+    if (isRecordingRef.current) {
+      requestAnimationFrame(checkVoiceActivity);
+    }
+  };
+
+
+  const handleSendWithText = async (textToSend) => {
+    const userMessage = textToSend.trim();
+    console.log("handleSendWithText called with:", userMessage, "isGenerating:", isGenerating, "isGeneratingRef:", isGeneratingRef.current);
+    
+    if (!userMessage) {
+      console.log("No user message, returning");
+      return;
+    }
+    
+    if (isGeneratingRef.current) {
+      console.log("Already generating (ref), returning");
+      return;
+    }
+    
     // Set generating state
     console.log("Setting generating state to true");
     setIsGenerating(true);
     
     // Add current user message locally
     setMessages(prev => [...prev, { role: "user", text: userMessage }]);
-    setInput("");
   
     // ✅ Take last 3 user and last 3 bot messages
     const lastUserMessages = messages.filter(m => m.role === "user").slice(-3);
@@ -99,11 +231,34 @@ export default function ChatUI() {
   
     // Start TTS
     const voiceMapping = ttsProvider === 'elevenlabs' ? elevenLabsVoices : voices;
+    
+    // Mark avatar as speaking
+    isAvatarSpeakingRef.current = true;
+    
+    // Fallback timeout to reset generating state (in case avatar doesn't signal completion)
+    setTimeout(() => {
+      if (isGeneratingRef.current) {
+        console.log('Fallback: resetting generating state after timeout');
+        setIsGenerating(false);
+        isAvatarSpeakingRef.current = false;
+      }
+    }, 10000); // 10 second fallback
+    
     talkingHeadRef.current?.speak(
       cleanMessage,
       voiceMapping[langCode] || voiceMapping["en"],
       ttsProvider
     );
+  };
+
+  const handleSend = async () => {
+    const userMessage = input.trim();
+    if (!userMessage || isGenerating) return;
+    
+    // Clear the input immediately to prevent duplicate sends
+    setInput("");
+    
+    await handleSendWithText(userMessage);
   };
 
   // Server-side Speech-to-Text functionality using existing Azure API
@@ -118,11 +273,34 @@ export default function ChatUI() {
         }
       });
       
-      // Audio level monitoring (removed excessive logging)
+      // Set up audio context for voice activity detection
+      console.log('Setting up audio context for voice detection...');
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('Audio context created, state:', audioContext.state);
+      
+      // Resume audio context if suspended
+      if (audioContext.state === 'suspended') {
+        console.log('Resuming suspended audio context...');
+        await audioContext.resume();
+        console.log('Audio context resumed, new state:', audioContext.state);
+      }
+      
       const analyser = audioContext.createAnalyser();
       const microphone = audioContext.createMediaStreamSource(stream);
       microphone.connect(analyser);
+      console.log('Analyser created and connected to microphone');
+      
+      // Configure analyser for voice detection
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      analyser.minDecibels = -90;
+      analyser.maxDecibels = -10;
+      console.log('Analyser configured, fftSize:', analyser.fftSize, 'frequencyBinCount:', analyser.frequencyBinCount);
+      
+      // Store references for voice activity detection
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      console.log('References stored for voice activity detection');
       
       // Use WebM with Opus codec for better compatibility
       const mimeType = 'audio/webm;codecs=opus';
@@ -136,6 +314,7 @@ export default function ChatUI() {
         audioBitsPerSecond: 16000 // Lower bitrate for better performance
       });
       mediaRecorderRef.current = recorder;
+      isRecordingRef.current = true;
       setIsRecording(true);
       setIsListening(true);
       
@@ -170,7 +349,17 @@ export default function ChatUI() {
           const data = await response.json();
           
           if (data.text && data.text.trim()) {
-            setInput(prev => prev + (prev ? ' ' : '') + data.text.trim());
+            const recognizedText = data.text.trim();
+            
+            // In conversation mode, auto-send the message without adding to input
+            if (conversationModeRef.current) {
+              console.log('Conversation mode: auto-sending recognized text:', recognizedText);
+              // Use the recognized text directly without adding to input
+              handleSendWithText(recognizedText);
+            } else {
+              // In normal mode, add to input field
+              setInput(prev => prev + (prev ? ' ' : '') + recognizedText);
+            }
           } else if (data.error) {
             console.error('STT error:', data.error);
             alert(`Speech recognition error: ${data.error}`);
@@ -181,8 +370,16 @@ export default function ChatUI() {
           alert(`Speech recognition error: ${error.message}`);
         } finally {
           stream.getTracks().forEach(track => track.stop());
+          isRecordingRef.current = false;
           setIsRecording(false);
           setIsListening(false);
+          // Stop voice activity detection
+          voiceDetectionRunningRef.current = false;
+          // Clear voice activity detection
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+          }
         }
       };
       
@@ -190,26 +387,73 @@ export default function ChatUI() {
         console.error('MediaRecorder error:', event.error);
         alert(`Recording error: ${event.error.message}`);
         stream.getTracks().forEach(track => track.stop());
+        isRecordingRef.current = false;
         setIsRecording(false);
         setIsListening(false);
+        // Stop voice activity detection
+        voiceDetectionRunningRef.current = false;
+        // Clear voice activity detection
+        if (silenceTimeoutRef.current) {
+          clearTimeout(silenceTimeoutRef.current);
+          silenceTimeoutRef.current = null;
+        }
       };
       
       // Start recording
       recorder.start(1000); // Collect data every second
       
+      // Start voice activity detection after a small delay
+      setTimeout(() => {
+        console.log('Starting voice activity detection...');
+        voiceDetectionRunningRef.current = true;
+        checkVoiceActivity();
+      }, 100);
+      
     } catch (error) {
       console.error('Error accessing microphone:', error);
       alert(`Error accessing microphone: ${error.message}`);
+      isRecordingRef.current = false;
       setIsRecording(false);
       setIsListening(false);
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       mediaRecorderRef.current.stop();
+      isRecordingRef.current = false;
       setIsRecording(false);
       setIsListening(false);
+      
+      // Stop voice activity detection
+      voiceDetectionRunningRef.current = false;
+      
+      // Clear voice activity detection
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+      }
+      
+      // If in conversation mode, exit it when manually stopping recording
+      if (conversationModeRef.current) {
+        console.log('Manually stopping recording, exiting conversation mode');
+        setConversationMode(false);
+      }
+    }
+  };
+
+  // Start conversation mode
+  const startConversationMode = async () => {
+    if (conversationMode) {
+      // Stop conversation mode
+      setConversationMode(false);
+      if (isRecordingRef.current) {
+        stopRecording();
+      }
+    } else {
+      // Start conversation mode
+      setConversationMode(true);
+      await startRecording();
     }
   };
 
@@ -261,16 +505,16 @@ export default function ChatUI() {
                   placeholder="Type your message here"
                   onKeyPress={e => e.key === 'Enter' && !isGenerating && handleSend()}
                 />
-                <button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  disabled={isGenerating}
-                  className={`p-2 rounded-full transition-colors duration-200 group ${
-                    isRecording 
-                      ? 'bg-red-500 hover:bg-red-600' 
-                      : 'bg-gray-800 hover:bg-gray-700'
-                  } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  title={isRecording ? 'Stop recording' : 'Start recording'}
-                >
+                    <button
+                      onClick={isRecording ? stopRecording : (conversationMode ? startConversationMode : startRecording)}
+                      disabled={isGenerating}
+                      className={`p-2 rounded-full transition-colors duration-200 group ${
+                        isRecording 
+                          ? 'bg-red-500 hover:bg-red-600' 
+                          : 'bg-gray-800 hover:bg-gray-700'
+                      } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={isRecording ? 'Stop recording & exit conversation' : (conversationMode ? 'Toggle conversation mode' : 'Start recording')}
+                    >
                   {isRecording ? (
                     <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
                       <rect x="6" y="6" width="12" height="12" rx="2"/>
@@ -291,12 +535,14 @@ export default function ChatUI() {
                     </svg>
                   )}
                 </button>
-                {isGenerating && (
-                  <span className="text-gray-400 text-xs lg:text-sm">Generating...</span>
-                )}
-                {isListening && (
-                  <span className="text-red-400 text-xs lg:text-sm animate-pulse">Listening...</span>
-                )}
+                    {isGenerating && (
+                      <span className="text-gray-400 text-xs lg:text-sm">Generating...</span>
+                    )}
+                    {isListening && (
+                      <span className="text-red-400 text-xs lg:text-sm animate-pulse">
+                        {isRecording ? 'Listening...' : 'Processing...'}
+                      </span>
+                    )}
               </div>
             </div>
         </div>
@@ -307,57 +553,61 @@ export default function ChatUI() {
             <h1 className="text-2xl lg:text-4xl font-bold mb-1 lg:mb-2">Hey, I&apos;m Matthew!</h1>
             <p className="text-gray-300 text-sm lg:text-base">I&apos;m a virtual 3D AI Clone. Ask me anything!</p>
             
-            {/* TTS Provider Toggle */}
-            <div className="mt-4 flex items-center justify-center space-x-4">
-              <span className="text-gray-400 text-sm">TTS Provider:</span>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setTtsProvider('azure')}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    ttsProvider === 'azure'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  Azure
-                </button>
-                <button
-                  onClick={() => setTtsProvider('elevenlabs')}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    ttsProvider === 'elevenlabs'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  ElevenLabs
-                </button>
-              </div>
+            
+            {/* Conversation Mode Toggle */}
+            <div className="mt-2 flex items-center justify-center space-x-4">
+              <button
+                onClick={startConversationMode}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  conversationMode
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {conversationMode ? '🟢 Conversation Mode ON' : '⚪ Conversation Mode OFF'}
+              </button>
             </div>
           </div>
           
           <div className="w-full max-w-2xl">
-            <TalkingHeadDemo
-              ref={talkingHeadRef}
-              onWord={(word, i, info) => {
-                setMessages(prev => {
-                  const last = prev[prev.length - 1];
-                  if (last && last.isBuilding) {
-                    const newText = appendToken(last?.text || "", word);
+                <TalkingHeadDemo
+                  ref={talkingHeadRef}
+                  onWord={(word, i, info) => {
+                    setMessages(prev => {
+                      const last = prev[prev.length - 1];
+                      if (last && last.isBuilding) {
+                        const newText = appendToken(last?.text || "", word);
 
-                    // ✅ Convert phrases live
-                    const linkedText = convertPhrasesToLinks(newText);
+                        // ✅ Convert phrases live
+                        const linkedText = convertPhrasesToLinks(newText);
 
-                    // If this is the last word, mark as complete and reset generating state
-                    if (info?.isLastWord) {
-                      setIsGenerating(false);
-                    }
+                        // If this is the last word, mark as complete and reset generating state
+                        if (info?.isLastWord) {
+                          console.log('Avatar finished speaking, resetting generating state');
+                          setIsGenerating(false);
+                          // Mark avatar as done speaking
+                          isAvatarSpeakingRef.current = false;
+                          console.log('Avatar finished speaking');
+                          
+                          // In conversation mode, restart recording
+                          if (conversationModeRef.current && !isRecordingRef.current) {
+                            console.log('Conversation mode: restarting recording');
+                            setTimeout(async () => {
+                              try {
+                                await startRecording();
+                              } catch (error) {
+                                console.error('Error restarting recording in conversation mode:', error);
+                              }
+                            }, 500); // Small delay to ensure avatar is done
+                          }
+                        }
 
-                    return [...prev.slice(0, -1), { role: "Matthew", text: linkedText, isBuilding: !info?.isLastWord }];
-                  }
-                  return prev;
-                });
-              }}
-            />
+                        return [...prev.slice(0, -1), { role: "Matthew", text: linkedText, isBuilding: !info?.isLastWord }];
+                      }
+                      return prev;
+                    });
+                  }}
+                />
           </div>
         </div>
       </div>
