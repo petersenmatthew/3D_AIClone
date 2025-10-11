@@ -42,6 +42,7 @@ export default function ChatUI() {
   const isAvatarSpeakingRef = useRef(false);
   const voiceDetectionRunningRef = useRef(false);
   const isGeneratingRef = useRef(false);
+  const wordsSpokenInCurrentRecordingRef = useRef(false);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -106,17 +107,13 @@ export default function ChatUI() {
 
   // Voice Activity Detection
   const checkVoiceActivity = () => {
-    console.log('checkVoiceActivity called, analyserRef.current:', !!analyserRef.current, 'isRecordingRef.current:', isRecordingRef.current, 'conversationMode:', conversationModeRef.current, 'isAvatarSpeaking:', isAvatarSpeakingRef.current);
-    
     if (!analyserRef.current || !isRecordingRef.current || !voiceDetectionRunningRef.current) {
-      console.log('Exiting checkVoiceActivity - no analyser, not recording, or detection stopped');
       voiceDetectionRunningRef.current = false;
       return;
     }
 
     // In conversation mode, don't detect voice if avatar is speaking
     if (conversationModeRef.current && isAvatarSpeakingRef.current) {
-      console.log('Avatar is speaking, skipping voice detection');
       // Continue monitoring but don't process voice
       if (isRecordingRef.current) {
         requestAnimationFrame(checkVoiceActivity);
@@ -130,29 +127,29 @@ export default function ChatUI() {
     // Calculate average volume
     const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
     
-    // Debug logging
-    console.log('Voice activity level:', average);
-    
     // Threshold for voice detection (lowered for better sensitivity)
     const voiceThreshold = 5;
     
     if (average > voiceThreshold) {
-      // Voice detected - clear any existing timeout
+      // Voice detected - mark that words have been spoken and clear any existing timeout
+      if (!wordsSpokenInCurrentRecordingRef.current) {
+        console.log('🎤 Voice activity detected - starting speech recognition');
+      }
+      wordsSpokenInCurrentRecordingRef.current = true;
       if (silenceTimeoutRef.current) {
         clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = null;
-        console.log('Voice detected, cleared timeout');
       }
     } else {
-      // Silence detected - start timeout if not already started
-      if (!silenceTimeoutRef.current) {
-        console.log('Silence detected, starting timeout');
-        const timeoutDuration = conversationModeRef.current ? 1500 : 2000; // Shorter timeout in conversation mode
+      // Silence detected - only start timeout if words have been spoken
+      if (!silenceTimeoutRef.current && wordsSpokenInCurrentRecordingRef.current) {
+        console.log('🔇 Voice stopped - waiting for silence timeout');
+        const timeoutDuration = conversationModeRef.current ? 1000 : 2000; // 1 second in conversation mode, 2 seconds in normal mode
         silenceTimeoutRef.current = setTimeout(() => {
           // Auto-stop recording after silence
-          console.log('Auto-stopping due to silence');
+          console.log('⏹️ Auto-stopping recording due to silence');
           if (isRecordingRef.current) {
-            stopRecording();
+            stopRecording(false); // Don't exit conversation mode on auto-stop
           }
         }, timeoutDuration);
       }
@@ -274,33 +271,26 @@ export default function ChatUI() {
       });
       
       // Set up audio context for voice activity detection
-      console.log('Setting up audio context for voice detection...');
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      console.log('Audio context created, state:', audioContext.state);
       
       // Resume audio context if suspended
       if (audioContext.state === 'suspended') {
-        console.log('Resuming suspended audio context...');
         await audioContext.resume();
-        console.log('Audio context resumed, new state:', audioContext.state);
       }
       
       const analyser = audioContext.createAnalyser();
       const microphone = audioContext.createMediaStreamSource(stream);
       microphone.connect(analyser);
-      console.log('Analyser created and connected to microphone');
       
       // Configure analyser for voice detection
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.3;
       analyser.minDecibels = -90;
       analyser.maxDecibels = -10;
-      console.log('Analyser configured, fftSize:', analyser.fftSize, 'frequencyBinCount:', analyser.frequencyBinCount);
       
       // Store references for voice activity detection
       audioContextRef.current = audioContext;
       analyserRef.current = analyser;
-      console.log('References stored for voice activity detection');
       
       // Use WebM with Opus codec for better compatibility
       const mimeType = 'audio/webm;codecs=opus';
@@ -309,7 +299,7 @@ export default function ChatUI() {
         throw new Error('WebM with Opus codec not supported by this browser');
       }
       
-      const recorder = new MediaRecorder(stream, { 
+      const       recorder = new MediaRecorder(stream, { 
         mimeType,
         audioBitsPerSecond: 16000 // Lower bitrate for better performance
       });
@@ -317,6 +307,11 @@ export default function ChatUI() {
       isRecordingRef.current = true;
       setIsRecording(true);
       setIsListening(true);
+      
+      // Reset word tracking for new recording session
+      wordsSpokenInCurrentRecordingRef.current = false;
+      
+      console.log('🎙️ Recording started - waiting for voice input');
       
       let audioChunks = [];
       audioChunksRef.current = audioChunks;
@@ -332,7 +327,8 @@ export default function ChatUI() {
           const audioBlob = new Blob(audioChunks, { type: mimeType });
           
           if (audioBlob.size === 0) {
-            throw new Error('No audio data recorded');
+            console.log('No audio data recorded - silently continuing');
+            return;
           }
           
           const audioData = await audioBlob.arrayBuffer();
@@ -350,10 +346,14 @@ export default function ChatUI() {
           
           if (data.text && data.text.trim()) {
             const recognizedText = data.text.trim();
+            const detectedLanguage = data.language || 'en-US';
+            const confidence = data.confidence || 0;
+            
+            console.log(`🗣️ Speech recognized: "${recognizedText}" (${detectedLanguage}, confidence: ${confidence})`);
             
             // In conversation mode, auto-send the message without adding to input
             if (conversationModeRef.current) {
-              console.log('Conversation mode: auto-sending recognized text:', recognizedText);
+              console.log('💬 Conversation mode: auto-sending recognized text');
               // Use the recognized text directly without adding to input
               handleSendWithText(recognizedText);
             } else {
@@ -418,8 +418,10 @@ export default function ChatUI() {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = (isManualStop = false) => {
     if (mediaRecorderRef.current && isRecordingRef.current) {
+      console.log(isManualStop ? '⏹️ Recording stopped manually' : '⏹️ Recording stopped automatically');
+      
       mediaRecorderRef.current.stop();
       isRecordingRef.current = false;
       setIsRecording(false);
@@ -434,9 +436,9 @@ export default function ChatUI() {
         silenceTimeoutRef.current = null;
       }
       
-      // If in conversation mode, exit it when manually stopping recording
-      if (conversationModeRef.current) {
-        console.log('Manually stopping recording, exiting conversation mode');
+      // Only exit conversation mode if this is a manual stop
+      if (isManualStop && conversationModeRef.current) {
+        console.log('💬 Exiting conversation mode');
         setConversationMode(false);
       }
     }
@@ -448,11 +450,17 @@ export default function ChatUI() {
       // Stop conversation mode
       setConversationMode(false);
       if (isRecordingRef.current) {
-        stopRecording();
+        stopRecording(true); // Exit conversation mode on manual stop
       }
     } else {
       // Start conversation mode
       setConversationMode(true);
+      // Clear any existing silence timeout when entering conversation mode
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+        console.log('Cleared silence timeout when entering conversation mode');
+      }
       await startRecording();
     }
   };
@@ -506,7 +514,7 @@ export default function ChatUI() {
                   onKeyPress={e => e.key === 'Enter' && !isGenerating && handleSend()}
                 />
                     <button
-                      onClick={isRecording ? stopRecording : (conversationMode ? startConversationMode : startRecording)}
+                      onClick={isRecording ? () => stopRecording(true) : (conversationMode ? startConversationMode : startRecording)}
                       disabled={isGenerating}
                       className={`p-2 rounded-full transition-colors duration-200 group ${
                         isRecording 
@@ -553,20 +561,6 @@ export default function ChatUI() {
             <h1 className="text-2xl lg:text-4xl font-bold mb-1 lg:mb-2">Hey, I&apos;m Matthew!</h1>
             <p className="text-gray-300 text-sm lg:text-base">I&apos;m a virtual 3D AI Clone. Ask me anything!</p>
             
-            
-            {/* Conversation Mode Toggle */}
-            <div className="mt-2 flex items-center justify-center space-x-4">
-              <button
-                onClick={startConversationMode}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  conversationMode
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                {conversationMode ? '🟢 Conversation Mode ON' : '⚪ Conversation Mode OFF'}
-              </button>
-            </div>
           </div>
           
           <div className="w-full max-w-2xl">
@@ -595,10 +589,13 @@ export default function ChatUI() {
                             setTimeout(async () => {
                               try {
                                 await startRecording();
+                                // Reset word tracking for new recording session
+                                wordsSpokenInCurrentRecordingRef.current = false;
+                                console.log('Recording restarted, waiting for user to speak');
                               } catch (error) {
                                 console.error('Error restarting recording in conversation mode:', error);
                               }
-                            }, 500); // Small delay to ensure avatar is done
+                            }, 1000); // Longer delay to ensure avatar is completely done
                           }
                         }
 
@@ -608,6 +605,31 @@ export default function ChatUI() {
                     });
                   }}
                 />
+          </div>
+          
+          {/* Modern Conversation Mode Slider */}
+          <div className="mt-4 flex items-center justify-center">
+            <div className="flex items-center space-x-3">
+              <span className="text-gray-400 text-sm font-medium">Conversation Mode</span>
+              <button
+                onClick={startConversationMode}
+                disabled={isGenerating}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                  conversationMode ? 'bg-green-600' : 'bg-gray-600'
+                } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                role="switch"
+                aria-checked={conversationMode}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    conversationMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={`text-sm font-medium ${conversationMode ? 'text-green-400' : 'text-gray-400'}`}>
+                {conversationMode ? 'ON' : 'OFF'}
+              </span>
+            </div>
           </div>
         </div>
       </div>

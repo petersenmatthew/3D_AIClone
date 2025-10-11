@@ -81,6 +81,72 @@ export async function POST(req) {
           duration: wordDuration * 10000
         });
       }
+      
+      // Replace pinyin syllables with original Chinese characters
+      const originalText = text;
+      
+      // Check if text contains Chinese characters
+      const hasChinese = /[\u4e00-\u9fff]/.test(originalText);
+      
+      if (hasChinese) {
+        // For Chinese text, split into individual characters
+        const originalChars = Array.from(originalText).filter(char => char.trim().length > 0);
+        
+        // Map each alignment word to a Chinese character
+        for (let i = 0; i < wordData.length && i < originalChars.length; i++) {
+          wordData[i].text = originalChars[i];
+        }
+        
+        // Group Chinese characters into words for better display
+        const groupedWords = [];
+        let currentWord = '';
+        
+        for (let i = 0; i < wordData.length; i++) {
+          const char = wordData[i].text;
+          const isChinese = /[\u4e00-\u9fff]/.test(char);
+          
+          if (isChinese) {
+            currentWord += char;
+          } else {
+            // Non-Chinese character (punctuation, etc.)
+            if (currentWord) {
+              groupedWords.push({
+                text: currentWord,
+                audioOffset: wordData[i - currentWord.length]?.audioOffset || 0,
+                duration: wordData[i - 1]?.audioOffset + wordData[i - 1]?.duration - (wordData[i - currentWord.length]?.audioOffset || 0) || 0
+              });
+              currentWord = '';
+            }
+            groupedWords.push({
+              text: char,
+              audioOffset: wordData[i].audioOffset,
+              duration: wordData[i].duration
+            });
+          }
+        }
+        
+        // Add the last word if it exists
+        if (currentWord) {
+          const startIndex = wordData.length - currentWord.length;
+          groupedWords.push({
+            text: currentWord,
+            audioOffset: wordData[startIndex]?.audioOffset || 0,
+            duration: wordData[wordData.length - 1]?.audioOffset + wordData[wordData.length - 1]?.duration - (wordData[startIndex]?.audioOffset || 0) || 0
+          });
+        }
+        
+        // Replace wordData with grouped words
+        wordData.length = 0;
+        wordData.push(...groupedWords);
+      } else {
+        // For non-Chinese text, use word-based replacement
+        const originalWords = originalText.split(/\s+/).filter(word => word.length > 0);
+        
+        // Map alignment words to original words by position
+        for (let i = 0; i < wordData.length && i < originalWords.length; i++) {
+          wordData[i].text = originalWords[i];
+        }
+      }
 
       // Convert character alignment to viseme data
       const charToViseme = {
