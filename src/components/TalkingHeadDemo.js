@@ -1,5 +1,6 @@
 'use client';
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from "react";
+import * as THREE from 'three';
 
 const TalkingHeadDemo = forwardRef((props, ref) => {
   const avatarRef = useRef(null);
@@ -7,7 +8,41 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Expose `speak(textOrObj, voice, provider)` to parent via ref
+  // Helper function to add/update image rectangle
+  const addImageRectangle = (imagePath, position = { x: -1.5, y: 1.2, z: 0 }, onClick = null) => {
+    if (!headRef.current) return null;
+    
+    const scene = headRef.current.scene;
+    if (!scene) {
+      console.error('Scene not available');
+      return null;
+    }
+    
+    const textureLoader = new THREE.TextureLoader();
+    const texture = textureLoader.load(imagePath);
+    
+    const geometry = new THREE.BoxGeometry(1, 0.75, 0.02);
+    const material = new THREE.MeshBasicMaterial({ 
+      map: texture,
+      side: THREE.DoubleSide 
+    });
+    
+    const imageBox = new THREE.Mesh(geometry, material);
+    imageBox.position.set(position.x, position.y, position.z);
+    
+    // Add click detection if onClick is provided
+    if (onClick) {
+      imageBox.userData = { 
+        isClickable: true, 
+        onClick: onClick
+      };
+    }
+    
+    scene.add(imageBox);
+    return imageBox;
+  };
+
+  // Expose `speak(textOrObj, voice, provider)` and `addImageRectangle` to parent via ref
   useImperativeHandle(ref, () => ({
     speak: async (textOrObj, voice = 'en-CA-LiamNeural', provider = 'azure') => {
       if (!isInitialized || isPlaying) return;
@@ -71,7 +106,8 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         setIsPlaying(false);
       }
       
-    }
+    },
+    addImageRectangle
   }));
 
   useEffect(() => {
@@ -130,6 +166,77 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           avatarMood: 'happy',
           lipsyncLang: 'en'
         });
+
+        // Add 3D image rectangle after avatar is fully loaded
+        setTimeout(() => {
+          try {
+            const scene = head.scene; // Get the Three.js scene from TalkingHead
+
+            // Create texture loader
+            const textureLoader = new THREE.TextureLoader();
+            const texture = textureLoader.load('/images/4sight.png');
+
+            // Create thin rectangular geometry
+            const geometry = new THREE.BoxGeometry(0.25, 0.14, 0.02); // Medium rectangle (1m x 0.75m x 2cm)
+
+            // Create material with the image texture
+            const material = new THREE.MeshPhongMaterial({ 
+              map: texture,
+              side: THREE.DoubleSide 
+            });
+
+            // Create mesh and position it
+            const imageBox = new THREE.Mesh(geometry, material);
+            imageBox.position.set(-0.3, 1.75, 0); // Top-left of avatar (adjust as needed)
+            
+            // Add click detection
+            imageBox.userData = { 
+              isClickable: true, 
+              onClick: () => {
+                console.log('3D Rectangle clicked!');
+                alert('You clicked the 3D image rectangle! This is a placeholder.');
+              }
+            };
+
+            // Add to scene
+            scene.add(imageBox);
+            
+            // Set up raycasting for click detection
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            
+            const onMouseClick = (event) => {
+              // Calculate mouse position in normalized device coordinates
+              const rect = head.renderer.domElement.getBoundingClientRect();
+              mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+              mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+              
+              // Update the picking ray with the camera and mouse position
+              raycaster.setFromCamera(mouse, head.camera);
+              
+              // Calculate objects intersecting the picking ray
+              const intersects = raycaster.intersectObjects(scene.children, true);
+              
+              // Check if we clicked on our image box
+              for (let intersect of intersects) {
+                if (intersect.object.userData.isClickable) {
+                  intersect.object.userData.onClick();
+                  break;
+                }
+              }
+            };
+            
+            // Add click event listener to the renderer's DOM element
+            head.renderer.domElement.addEventListener('click', onMouseClick);
+            
+            // Store the click handler for cleanup
+            imageBox.userData.clickHandler = onMouseClick;
+            
+            console.log('3D image rectangle added successfully with click detection');
+          } catch (error) {
+            console.error('Error adding 3D image rectangle:', error);
+          }
+        }, 2000); // Wait 2 seconds for TalkingHead to fully initialize
         
         // Force a pose change shortly after load to trigger logging in setPoseFromTemplate
         if (typeof window !== 'undefined') {
@@ -137,7 +244,18 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
             try {
               console.log('[TalkingHeadDemo] Forcing pose change to ...');
               head.setPoseFromTemplate(head.poseTemplates.straight, 800);
-            } catch(e) {}
+              
+              // Play pointing animation after thumbup gesture
+              setTimeout(() => {
+                console.log('[TalkingHeadDemo] Playing pointing animation...');
+                // head.playGesture('pointright', 5, false, 300);
+                head.playAnimation('/animations/pointbackwards.fbx', null, 0.69, 0, 0.01);
+              }, 600); // 500ms gesture + 100ms buffer
+              
+              // -y fw, z up : rotated 180 degrees on y axis
+            } catch(e) {
+              console.error('[TalkingHeadDemo] Error playing gesture:', e);
+            }
           }, 1500);
         }
 

@@ -4,7 +4,8 @@ import TalkingHeadDemo from "./TalkingHeadDemo";
 import DOMPurify from "dompurify";
 import { voices } from "../utils/voices.js";
 import { elevenLabsVoices } from "../utils/elevenlabsVoices.js";
-import { convertPhrasesToLinks } from "../utils/linkMappings.js"; 
+import { convertPhrasesToLinks } from "../utils/linkMappings.js";
+import LinkPreviewRenderer from "./LinkPreviewRenderer.js"; 
 // ✅ Helper: append tokens without extra space before punctuation
 function appendToken(existing, token) {
   const noSpaceBefore = [".", ",", "!", "?", ":", ";"];
@@ -488,14 +489,9 @@ export default function ChatUI() {
                   ) : (
                     <>
                       <span className="text-green-400 flex-shrink-0">●</span>
-                      <div
+                      <LinkPreviewRenderer
+                        text={msg.text}
                         className="text-gray-200 whitespace-pre-wrap text-sm lg:text-base leading-tight pl-0"
-                        dangerouslySetInnerHTML={{
-                          __html: DOMPurify.sanitize(msg.text, {
-                            ALLOWED_TAGS: ["b", "i", "em", "strong", "a", "u"],
-                            ALLOWED_ATTR: ["href", "target", "rel", "style"],
-                          }),
-                        }}
                       />
                     </>
                   )}
