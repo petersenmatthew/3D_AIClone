@@ -1,16 +1,74 @@
 'use client';
-import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from "react";
 import * as THREE from 'three';
+import { linkMappings } from '../utils/linkMappings.js';
 
 const TalkingHeadDemo = forwardRef((props, ref) => {
   const avatarRef = useRef(null);
   const headRef = useRef(null);
+  const currentImageBoxRef = useRef(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // Function to detect links in text and find their timing
+  const detectLinksInText = (text, words, wtimes) => {
+    const linkPhrases = Object.keys(linkMappings);
+    const detectedLinks = [];
+    
+    // Find all link phrases in the text
+    linkPhrases.forEach(phrase => {
+      const regex = phrase.startsWith('@')
+        ? new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+        : new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const startIndex = match.index;
+        const endIndex = startIndex + phrase.length;
+        
+        // Find which word contains this phrase
+        let wordIndex = 0;
+        let currentPos = 0;
+        
+        for (let i = 0; i < words.length; i++) {
+          const wordStart = currentPos;
+          const wordEnd = currentPos + words[i].length;
+          
+          if (startIndex >= wordStart && startIndex < wordEnd) {
+            wordIndex = i;
+            break;
+          }
+          currentPos = wordEnd + 1; // +1 for space
+        }
+        
+        detectedLinks.push({
+          phrase,
+          wordIndex,
+          startTime: wtimes[wordIndex] || 0,
+          linkData: linkMappings[phrase]
+        });
+      }
+    });
+    
+    return detectedLinks;
+  };
+
+  // Helper function to remove existing image box
+  const removeCurrentImageBox = useCallback(() => {
+    if (currentImageBoxRef.current && headRef.current?.scene) {
+      headRef.current.scene.remove(currentImageBoxRef.current);
+      currentImageBoxRef.current = null;
+    }
+  }, []);
+
   // Helper function to add/update image rectangle
-  const addImageRectangle = (imagePath, position = { x: -1.5, y: 1.2, z: 0 }, onClick = null) => {
-    if (!headRef.current) return null;
+  const addImageRectangle = (imagePath, position = { x: 0, y: 1.3, z: 0.4 }, onClick = null) => {
+    if (!headRef.current) {
+      return null;
+    }
+    
+    // Remove existing image box first
+    removeCurrentImageBox();
     
     const scene = headRef.current.scene;
     if (!scene) {
@@ -18,17 +76,22 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
       return null;
     }
     
+    // Create a group to hold both the image and the close button
+    const imageGroup = new THREE.Group();
+    imageGroup.position.set(position.x, position.y, position.z);
+    
+    // Create the main image box
     const textureLoader = new THREE.TextureLoader();
     const texture = textureLoader.load(imagePath);
     
-    const geometry = new THREE.BoxGeometry(1, 0.75, 0.02);
-    const material = new THREE.MeshBasicMaterial({ 
+    const geometry = new THREE.BoxGeometry(0.50, 0.28125, 0.02);
+    const material = new THREE.MeshPhongMaterial({ 
       map: texture,
-      side: THREE.DoubleSide 
+      side: THREE.FrontSide // Only render front side to avoid ghosting
     });
     
     const imageBox = new THREE.Mesh(geometry, material);
-    imageBox.position.set(position.x, position.y, position.z);
+    imageBox.position.set(0, 0, 0);
     
     // Add click detection if onClick is provided
     if (onClick) {
@@ -38,8 +101,34 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
       };
     }
     
-    scene.add(imageBox);
-    return imageBox;
+    // Create the X close button using the SVG texture
+    const closeButtonTexture = textureLoader.load('/images/x_button.svg');
+    const closeButtonGeometry = new THREE.BoxGeometry(0.03, 0.03, 0.01);
+    const closeButtonMaterial = new THREE.MeshPhongMaterial({ 
+      map: closeButtonTexture,
+      side: THREE.FrontSide, // Only render front side to avoid ghosting
+      transparent: true
+    });
+    
+    const closeButton = new THREE.Mesh(closeButtonGeometry, closeButtonMaterial);
+    // Position the close button in the top-left corner
+    closeButton.position.set(-0.225, 0.115, 0.015); // Slightly in front of the image
+    closeButton.userData = { 
+      isClickable: true, 
+      onClick: () => {
+        console.log('Close button clicked');
+        removeCurrentImageBox();
+      }
+    };
+    
+    // Add both to the group
+    imageGroup.add(imageBox);
+    imageGroup.add(closeButton);
+    
+    // Add the group to the scene
+    scene.add(imageGroup);
+    currentImageBoxRef.current = imageGroup;
+    return imageGroup;
   };
 
   // Expose `speak(textOrObj, voice, provider)` and `addImageRectangle` to parent via ref
@@ -47,6 +136,9 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     speak: async (textOrObj, voice = 'en-CA-LiamNeural', provider = 'azure') => {
       if (!isInitialized || isPlaying) return;
       setIsPlaying(true);
+
+      // Clear any existing image box when starting a new message
+      removeCurrentImageBox();
 
       try {
         // Accept either a plain text string, or { message, voice }
@@ -81,6 +173,9 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         const wtimes = data.words.map(w => w.audioOffset / 10000);
         const wdurations = data.words.map(w => w.duration / 10000);
 
+        // Detect links in the text
+        const detectedLinks = detectLinksInText(text, words, wtimes);
+        
         // Use the real timing data from ElevenLabs WebSocket
         headRef.current.speakAudio({
           audio: audioBuffer,
@@ -90,6 +185,24 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           visemes: processedVisemes.visemes,
           vtimes: processedVisemes.times,
           vdurations: processedVisemes.durations,
+        });
+
+
+        // Handle link detection - show image and play gesture
+        detectedLinks.forEach(link => {
+          const delayMs = link.startTime; // Already in milliseconds from the TTS data
+          
+          setTimeout(() => {
+            // Play present gesture when link is mentioned
+            if (headRef.current) {
+              headRef.current.playGesture('present', 2, false, 1000);
+            }
+            
+            // Show the appropriate image for the link
+            addImageRectangle(link.linkData.image, { x: 0, y: 1.3, z: 0.4 }, () => {
+              window.open(link.linkData.url, '_blank');
+            });
+          }, delayMs); // Use the delay directly
         });
 
         // 👇 Fire callback back to ChatUI
@@ -102,12 +215,17 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         }
       } catch (err) {
         console.error("TTS error:", err);
+        // If there's an error, still call the last word callback to reset generating state
+        if (props.onWord) {
+          props.onWord("", 0, { isLastWord: true, error: true });
+        }
       } finally {
         setIsPlaying(false);
       }
       
     },
-    addImageRectangle
+    addImageRectangle,
+    removeCurrentImageBox
   }));
 
   useEffect(() => {
@@ -135,7 +253,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           lipsyncModules: ["en"],
           lipsyncLang: 'en',
           cameraView: 'upper',           // 'full', 'mid', 'upper', 'head'
-          cameraRotateX: 0.6,
+          cameraRotateX: 0,
           cameraY: 0.5,       // Move camera down
           cameraRotateEnable: true,     // allow user rotation
           cameraPanEnable: true,       // allow user panning
@@ -167,41 +285,10 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           lipsyncLang: 'en'
         });
 
-        // Add 3D image rectangle after avatar is fully loaded
+        // Set up raycasting for click detection on dynamic image boxes
         setTimeout(() => {
           try {
-            const scene = head.scene; // Get the Three.js scene from TalkingHead
-
-            // Create texture loader
-            const textureLoader = new THREE.TextureLoader();
-            const texture = textureLoader.load('/images/4sight.png');
-
-            // Create thin rectangular geometry
-            const geometry = new THREE.BoxGeometry(0.25, 0.14, 0.02); // Medium rectangle (1m x 0.75m x 2cm)
-
-            // Create material with the image texture
-            const material = new THREE.MeshPhongMaterial({ 
-              map: texture,
-              side: THREE.DoubleSide 
-            });
-
-            // Create mesh and position it
-            const imageBox = new THREE.Mesh(geometry, material);
-            imageBox.position.set(-0.3, 1.75, 0); // Top-left of avatar (adjust as needed)
-            
-            // Add click detection
-            imageBox.userData = { 
-              isClickable: true, 
-              onClick: () => {
-                console.log('3D Rectangle clicked!');
-                alert('You clicked the 3D image rectangle! This is a placeholder.');
-              }
-            };
-
-            // Add to scene
-            scene.add(imageBox);
-            
-            // Set up raycasting for click detection
+            const scene = head.scene;
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2();
             
@@ -217,7 +304,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
               // Calculate objects intersecting the picking ray
               const intersects = raycaster.intersectObjects(scene.children, true);
               
-              // Check if we clicked on our image box
+              // Check if we clicked on any clickable object
               for (let intersect of intersects) {
                 if (intersect.object.userData.isClickable) {
                   intersect.object.userData.onClick();
@@ -229,12 +316,9 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
             // Add click event listener to the renderer's DOM element
             head.renderer.domElement.addEventListener('click', onMouseClick);
             
-            // Store the click handler for cleanup
-            imageBox.userData.clickHandler = onMouseClick;
-            
-            console.log('3D image rectangle added successfully with click detection');
+            console.log('Click detection set up for dynamic image rectangles');
           } catch (error) {
-            console.error('Error adding 3D image rectangle:', error);
+            console.error('Error setting up click detection:', error);
           }
         }, 2000); // Wait 2 seconds for TalkingHead to fully initialize
         
@@ -248,8 +332,8 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
               // Play pointing animation after thumbup gesture
               setTimeout(() => {
                 console.log('[TalkingHeadDemo] Playing pointing animation...');
-                // head.playGesture('pointright', 5, false, 300);
-                head.playAnimation('/animations/pointbackwards.fbx', null, 0.69, 0, 0.01);
+                // head.playGesture('present', 5, false, 1000);
+                // head.playAnimation('/animations/pointbackwards.fbx', null, 0.69, 0, 0.01);
               }, 600); // 500ms gesture + 100ms buffer
               
               // -y fw, z up : rotated 180 degrees on y axis
@@ -269,7 +353,11 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
 
     initAvatar();
 
-    return () => headRef.current?.stop();
+    return () => {
+      removeCurrentImageBox();
+      headRef.current?.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
       const convertVisemesToOculus = visemes => {

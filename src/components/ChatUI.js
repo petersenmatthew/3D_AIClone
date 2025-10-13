@@ -5,7 +5,8 @@ import DOMPurify from "dompurify";
 import { voices } from "../utils/voices.js";
 import { elevenLabsVoices } from "../utils/elevenlabsVoices.js";
 import { convertPhrasesToLinks } from "../utils/linkMappings.js";
-import LinkPreviewRenderer from "./LinkPreviewRenderer.js"; 
+import LinkPreviewRenderer from "./LinkPreviewRenderer.js";
+import { motion } from "motion/react"; 
 // ✅ Helper: append tokens without extra space before punctuation
 function appendToken(existing, token) {
   const noSpaceBefore = [".", ",", "!", "?", ":", ";"];
@@ -28,7 +29,7 @@ export default function ChatUI() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [ttsProvider, setTtsProvider] = useState('elevenlabs'); // 'azure' or 'elevenlabs'
+  const [ttsProvider, setTtsProvider] = useState('azure'); // 'azure' or 'elevenlabs'
   const [conversationMode, setConversationMode] = useState(false);
   const talkingHeadRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -233,20 +234,18 @@ export default function ChatUI() {
     // Mark avatar as speaking
     isAvatarSpeakingRef.current = true;
     
-    // Fallback timeout to reset generating state (in case avatar doesn't signal completion)
-    setTimeout(() => {
-      if (isGeneratingRef.current) {
-        console.log('Fallback: resetting generating state after timeout');
-        setIsGenerating(false);
-        isAvatarSpeakingRef.current = false;
-      }
-    }, 10000); // 10 second fallback
-    
-    talkingHeadRef.current?.speak(
-      cleanMessage,
-      voiceMapping[langCode] || voiceMapping["en"],
-      ttsProvider
-    );
+    try {
+      await talkingHeadRef.current?.speak(
+        cleanMessage,
+        voiceMapping[langCode] || voiceMapping["en"],
+        ttsProvider
+      );
+    } catch (error) {
+      console.error('TTS error:', error);
+      // Reset generating state on error
+      setIsGenerating(false);
+      isAvatarSpeakingRef.current = false;
+    }
   };
 
   const handleSend = async () => {
@@ -540,7 +539,35 @@ export default function ChatUI() {
                   )}
                 </button>
                     {isGenerating && (
-                      <span className="text-gray-400 text-xs lg:text-sm">Generating...</span>
+                      <div className="text-xs lg:text-sm">
+                        <div className="font-sans font-medium [--shadow-color:var(--color-gray-400)] dark:[--shadow-color:var(--color-gray-100)]">
+                          {"Generating...".split("").map((char, i) => (
+                            <motion.span
+                              key={i}
+                              className="inline-block text-gray-400"
+                              initial={{ scale: 1, opacity: 0.5 }}
+                              animate={{
+                                scale: [1, 1.1, 1],
+                                textShadow: [
+                                  "0 0 0 var(--shadow-color)",
+                                  "0 0 1px var(--shadow-color)",
+                                  "0 0 0 var(--shadow-color)",
+                                ],
+                                opacity: [0.5, 1, 0.5],
+                              }}
+                              transition={{
+                                duration: 0.5,
+                                repeat: Infinity,
+                                repeatType: "loop",
+                                delay: i * 0.05,
+                                ease: "easeInOut",
+                                repeatDelay: 2,
+                              }}>
+                              {char === " " ? "\u00A0" : char}
+                            </motion.span>
+                          ))}
+                        </div>
+                      </div>
                     )}
                     {isListening && (
                       <span className="text-red-400 text-xs lg:text-sm animate-pulse">

@@ -7,7 +7,7 @@ export const linkMappings = {
   '@mmptrsn': { url: 'https://twitter.com/mmptrsn', image: '/images/twitter.png' },
   '@mxtthewpetersen': { url: 'https://instagram.com/mxtthewpetersen', image: '/images/4sight.png' },
   'matthewp@uwaterloo.ca': { url: 'mailto:matthewp@uwaterloo.ca', image: '/images/4sight.png' },
-  'Schulich Leader Scholarship': { url: 'https://schulichleaders.com/', image: '/images/schulichleaders.png' },
+  'Schulich Leaders Scholarship': { url: 'https://schulichleaders.com/', image: '/images/schulichleaders.png' },
   '4Sight': { url: 'https://github.com/justinwuzijin/eye-tester-app', image: '/images/4sight.png' },
 };
 

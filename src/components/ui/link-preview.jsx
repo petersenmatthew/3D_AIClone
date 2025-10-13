@@ -107,14 +107,19 @@ export const LinkPreview = ({
                 }}>
                 <a
                   href={url}
-                  className="block p-1 bg-white border-2 border-transparent shadow rounded-xl hover:border-neutral-200 dark:hover:border-neutral-800"
-                  style={{ fontSize: 0 }}>
+                  className="block bg-white border-2 border-transparent shadow rounded-xl hover:border-neutral-200 dark:hover:border-neutral-800"
+                  style={{ fontSize: 0, width: width }}>
                   <img
                     src={isStatic ? imageSrc : src}
                     width={width}
                     height={height}
-                    className="rounded-lg"
+                    className="rounded-t-lg"
                     alt="preview image" />
+                  <div className="px-2 py-1 bg-gray-50 dark:bg-gray-800 rounded-b-lg" style={{ width: width }}>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 font-mono truncate">
+                      {url}
+                    </p>
+                  </div>
                 </a>
               </motion.div>
             )}
