@@ -93,6 +93,36 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     const imageBox = new THREE.Mesh(geometry, material);
     imageBox.position.set(0, 0, 0);
     
+    // Create a clean border using a simple approach
+    const borderThickness = 0.005;
+    
+    // Create the main border frame (slightly larger than the image)
+    const borderGeometry = new THREE.BoxGeometry(0.51, 0.29125, borderThickness);
+    const borderMaterial = new THREE.MeshPhongMaterial({ 
+      color: 0x888888, // Light grey color
+      side: THREE.FrontSide,
+      transparent: true,
+      opacity: 0.9
+    });
+    
+    const borderBox = new THREE.Mesh(borderGeometry, borderMaterial);
+    borderBox.position.set(0, 0, -0.001); // Slightly behind the image
+    
+    // Create a subtle shadow/glow effect
+    const shadowGeometry = new THREE.BoxGeometry(0.52, 0.30125, 0.001);
+    const shadowMaterial = new THREE.MeshPhongMaterial({ 
+      color: 0x000000,
+      side: THREE.FrontSide,
+      transparent: true,
+      opacity: 0.1
+    });
+    
+    const shadowBox = new THREE.Mesh(shadowGeometry, shadowMaterial);
+    shadowBox.position.set(0, 0, -0.002); // Behind the border
+    
+    // No corner elements needed - keep it clean and simple
+    const corners = [];
+    
     // Add click detection if onClick is provided
     if (onClick) {
       imageBox.userData = { 
@@ -103,10 +133,10 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     
     // Create the X close button using the SVG texture
     const closeButtonTexture = textureLoader.load('/images/x_button.svg');
-    const closeButtonGeometry = new THREE.BoxGeometry(0.03, 0.03, 0.01);
+    const closeButtonGeometry = new THREE.PlaneGeometry(0.03, 0.03); // Use PlaneGeometry for flat surface
     const closeButtonMaterial = new THREE.MeshPhongMaterial({ 
       map: closeButtonTexture,
-      side: THREE.FrontSide, // Only render front side to avoid ghosting
+      side: THREE.FrontSide, // Only render front side
       transparent: true
     });
     
@@ -117,17 +147,77 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
       isClickable: true, 
       onClick: () => {
         console.log('Close button clicked');
-        removeCurrentImageBox();
+        
+        // Animate the close with a smooth scale-down animation
+        const animateClose = () => {
+          const startTime = Date.now();
+          const duration = 200; // 200ms animation (faster than appearance)
+          
+          const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // Use easeInCubic for smooth acceleration
+            const easeInCubic = Math.pow(progress, 3);
+            const scale = 1 - easeInCubic; // Scale from 1 to 0
+            
+            imageGroup.scale.set(scale, scale, scale);
+            
+            if (progress < 1) {
+              requestAnimationFrame(animate);
+            } else {
+              // Remove the box after animation completes
+              removeCurrentImageBox();
+            }
+          };
+          
+          requestAnimationFrame(animate);
+        };
+        
+        // Start the close animation
+        animateClose();
       }
     };
     
-    // Add both to the group
+    // Add all elements to the group
+    imageGroup.add(shadowBox); // Add shadow first (behind everything)
+    imageGroup.add(borderBox); // Add border second (behind image)
     imageGroup.add(imageBox);
     imageGroup.add(closeButton);
     
     // Add the group to the scene
     scene.add(imageGroup);
     currentImageBoxRef.current = imageGroup;
+    
+    // Animate the appearance with a smooth scale animation
+    imageGroup.scale.set(0, 0, 0); // Start with no scale
+    
+    // Create smooth scale animation
+    const animateAppearance = () => {
+      const startTime = Date.now();
+      const duration = 300; // 300ms animation
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Use easeOutCubic for smooth deceleration
+        const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+        const scale = easeOutCubic;
+        
+        imageGroup.scale.set(scale, scale, scale);
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    };
+    
+    // Start the animation
+    animateAppearance();
+    
     return imageGroup;
   };
 
