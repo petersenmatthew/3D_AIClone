@@ -84,7 +84,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     const textureLoader = new THREE.TextureLoader();
     const texture = textureLoader.load(imagePath);
     
-    const geometry = new THREE.BoxGeometry(0.50, 0.28125, 0.02);
+    const geometry = new THREE.BoxGeometry(0.45, 0.28125, 0.02);
     const material = new THREE.MeshPhongMaterial({ 
       map: texture,
       side: THREE.FrontSide // Only render front side to avoid ghosting
@@ -97,7 +97,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     const borderThickness = 0.005;
     
     // Create the main border frame (slightly larger than the image)
-    const borderGeometry = new THREE.BoxGeometry(0.51, 0.29125, borderThickness);
+    const borderGeometry = new THREE.BoxGeometry(0.46, 0.29125, borderThickness);
     const borderMaterial = new THREE.MeshPhongMaterial({ 
       color: 0x888888, // Light grey color
       side: THREE.FrontSide,
@@ -109,19 +109,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     borderBox.position.set(0, 0, -0.001); // Slightly behind the image
     
     // Create a subtle shadow/glow effect
-    const shadowGeometry = new THREE.BoxGeometry(0.52, 0.30125, 0.001);
-    const shadowMaterial = new THREE.MeshPhongMaterial({ 
-      color: 0x000000,
-      side: THREE.FrontSide,
-      transparent: true,
-      opacity: 0.1
-    });
-    
-    const shadowBox = new THREE.Mesh(shadowGeometry, shadowMaterial);
-    shadowBox.position.set(0, 0, -0.002); // Behind the border
-    
-    // No corner elements needed - keep it clean and simple
-    const corners = [];
+
     
     // Add click detection if onClick is provided
     if (onClick) {
@@ -142,7 +130,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     
     const closeButton = new THREE.Mesh(closeButtonGeometry, closeButtonMaterial);
     // Position the close button in the top-left corner
-    closeButton.position.set(-0.225, 0.115, 0.015); // Slightly in front of the image
+    closeButton.position.set(-0.2, 0.115, 0.015); // Slightly in front of the image
     closeButton.userData = { 
       isClickable: true, 
       onClick: () => {
@@ -180,7 +168,6 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     };
     
     // Add all elements to the group
-    imageGroup.add(shadowBox); // Add shadow first (behind everything)
     imageGroup.add(borderBox); // Add border second (behind image)
     imageGroup.add(imageBox);
     imageGroup.add(closeButton);
@@ -278,16 +265,24 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         });
 
 
-        // Handle link detection - show image and play gesture
+        // Handle link detection - show image and play gesture when each link is actually spoken
         detectedLinks.forEach(link => {
           const delayMs = link.startTime; // Already in milliseconds from the TTS data
           
           setTimeout(() => {
+            // Clear any existing image box first
+            removeCurrentImageBox();
+            
+            // Skip if there is no image defined for this link mapping
+            if (!link?.linkData || !link.linkData.image) {
+              return;
+            }
+
             // Play present gesture when link is mentioned
             if (headRef.current) {
               headRef.current.playGesture('present', 2, false, 1000);
             }
-            
+
             // Show the appropriate image for the link
             addImageRectangle(link.linkData.image, { x: 0, y: 1.3, z: 0.4 }, () => {
               window.open(link.linkData.url, '_blank');
@@ -430,7 +425,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
             } catch(e) {
               console.error('[TalkingHeadDemo] Error playing gesture:', e);
             }
-          }, 1500);
+          }, 300);
         }
 
         setIsInitialized(true);

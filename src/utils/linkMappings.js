@@ -1,14 +1,13 @@
 // src/utils/linkMappings.js
 export const linkMappings = {
   'LinkedIn': { url: 'https://www.linkedin.com/in/petersen-matthew/', image: '/images/linkedin.png' },
-  'GitHub Portfolio': { url: 'https://github.com/petersenmatthew', image: '/images/4sight.png' },
-  'Personal Portfolio': { url: 'https://matthewpetersen.com', image: '/images/4sight.png' },
-  'my portfolio': { url: 'https://matthewpetersen.com', image: '/images/4sight.png' },
+  'GitHub Portfolio': { url: 'https://github.com/petersenmatthew', image: '/images/github.png' },
   '@mmptrsn': { url: 'https://twitter.com/mmptrsn', image: '/images/twitter.png' },
   '@mxtthewpetersen': { url: 'https://instagram.com/mxtthewpetersen', image: '/images/4sight.png' },
-  'matthewp@uwaterloo.ca': { url: 'mailto:matthewp@uwaterloo.ca', image: '/images/4sight.png' },
-  'Schulich Leaders Scholarship': { url: 'https://schulichleaders.com/', image: '/images/schulichleaders.png' },
+  'matthewp@uwaterloo.ca': { url: 'mailto:matthewp@uwaterloo.ca'},
+  'Schulich Leader Scholarship': { url: 'https://schulichleaders.com/', image: '/images/schulichleaders.png' },
   '4Sight': { url: 'https://github.com/justinwuzijin/eye-tester-app', image: '/images/4sight.png' },
+  'Project WhyFi': {url: 'https://projectwhyfi.ca/', image: '/images/projectwhyfi.png'}
 };
 
 export function convertPhrasesToLinks(text) {

@@ -37,7 +37,7 @@ export default function LinkPreviewRenderer({ text, className = "" }) {
   const getImageForUrl = (url) => {
     // Find the mapping that matches this URL
     const mapping = Object.values(linkMappings).find(data => data.url === url);
-    return mapping ? mapping.image : '/images/4sight.png'; // Default fallback
+    return mapping && mapping.image ? mapping.image : null; // No fallback image
   };
 
   const elements = parts.map((part, index) => {
@@ -45,11 +45,28 @@ export default function LinkPreviewRenderer({ text, className = "" }) {
     if (linkMatch) {
       const linkIndex = parseInt(linkMatch[1]);
       const link = linkData[linkIndex];
+      const isHttp = /^https?:/i.test(link.href);
+      const isMailto = /^mailto:/i.test(link.href);
+      const imageForLink = getImageForUrl(link.href);
+      // For non-http links (e.g., mailto) or when no image mapping exists, render a normal anchor without preview
+      if (!isHttp || !imageForLink) {
+        return (
+          <a
+            key={`link-${index}`}
+            href={link.href}
+            {...(isHttp ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+            className="text-white underline font-bold"
+          >
+            {link.text}
+          </a>
+        );
+      }
+      // Otherwise render with preview
       return (
         <LinkPreview
           key={`link-${index}`}
           url={link.href}
-          imageSrc={getImageForUrl(link.href)}
+          imageSrc={imageForLink}
           isStatic={true}
           className="text-blue-400 hover:text-blue-300 underline font-bold"
         >
