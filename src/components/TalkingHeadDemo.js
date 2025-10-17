@@ -10,7 +10,7 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Function to detect links in text and find their timing
+  // Function to detect links in text and capture their character start position
   const detectLinksInText = (text, words, wtimes) => {
     const linkPhrases = Object.keys(linkMappings);
     const detectedLinks = [];
@@ -26,25 +26,9 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
         const startIndex = match.index;
         const endIndex = startIndex + phrase.length;
         
-        // Find which word contains this phrase
-        let wordIndex = 0;
-        let currentPos = 0;
-        
-        for (let i = 0; i < words.length; i++) {
-          const wordStart = currentPos;
-          const wordEnd = currentPos + words[i].length;
-          
-          if (startIndex >= wordStart && startIndex < wordEnd) {
-            wordIndex = i;
-            break;
-          }
-          currentPos = wordEnd + 1; // +1 for space
-        }
-        
         detectedLinks.push({
           phrase,
-          wordIndex,
-          startTime: wtimes[wordIndex] || 0,
+          charStart: startIndex,
           linkData: linkMappings[phrase]
         });
       }
@@ -80,97 +64,121 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
     const imageGroup = new THREE.Group();
     imageGroup.position.set(position.x, position.y, position.z);
     
-    // Create the main image box
+    // Create the main image box (dynamically sized by image aspect)
     const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(imagePath);
-    
-    const geometry = new THREE.BoxGeometry(0.45, 0.28125, 0.02);
-    const material = new THREE.MeshPhongMaterial({ 
-      map: texture,
-      side: THREE.FrontSide // Only render front side to avoid ghosting
-    });
-    
-    const imageBox = new THREE.Mesh(geometry, material);
-    imageBox.position.set(0, 0, 0);
-    
-    // Create a clean border using a simple approach
-    const borderThickness = 0.005;
-    
-    // Create the main border frame (slightly larger than the image)
-    const borderGeometry = new THREE.BoxGeometry(0.46, 0.29125, borderThickness);
-    const borderMaterial = new THREE.MeshPhongMaterial({ 
-      color: 0x888888, // Light grey color
-      side: THREE.FrontSide,
-      transparent: true,
-      opacity: 0.9
-    });
-    
-    const borderBox = new THREE.Mesh(borderGeometry, borderMaterial);
-    borderBox.position.set(0, 0, -0.001); // Slightly behind the image
-    
-    // Create a subtle shadow/glow effect
+    const maxSide = 0.45; // keep the longer side at 0.45 units
 
-    
-    // Add click detection if onClick is provided
-    if (onClick) {
-      imageBox.userData = { 
-        isClickable: true, 
-        onClick: onClick
-      };
-    }
-    
-    // Create the X close button using the SVG texture
-    const closeButtonTexture = textureLoader.load('/images/x_button.svg');
-    const closeButtonGeometry = new THREE.PlaneGeometry(0.03, 0.03); // Use PlaneGeometry for flat surface
-    const closeButtonMaterial = new THREE.MeshPhongMaterial({ 
-      map: closeButtonTexture,
-      side: THREE.FrontSide, // Only render front side
-      transparent: true
-    });
-    
-    const closeButton = new THREE.Mesh(closeButtonGeometry, closeButtonMaterial);
-    // Position the close button in the top-left corner
-    closeButton.position.set(-0.2, 0.115, 0.015); // Slightly in front of the image
-    closeButton.userData = { 
-      isClickable: true, 
-      onClick: () => {
-        console.log('Close button clicked');
-        
-        // Animate the close with a smooth scale-down animation
-        const animateClose = () => {
-          const startTime = Date.now();
-          const duration = 200; // 200ms animation (faster than appearance)
-          
-          const animate = () => {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            
-            // Use easeInCubic for smooth acceleration
-            const easeInCubic = Math.pow(progress, 3);
-            const scale = 1 - easeInCubic; // Scale from 1 to 0
-            
-            imageGroup.scale.set(scale, scale, scale);
-            
-            if (progress < 1) {
-              requestAnimationFrame(animate);
-            } else {
-              // Remove the box after animation completes
-              removeCurrentImageBox();
-            }
+    // Load texture and build meshes once we know the natural size
+    textureLoader.load(
+      imagePath,
+      (texture) => {
+        const img = texture.image;
+        const imgWidth = (img && (img.width || img.naturalWidth)) || 1;
+        const imgHeight = (img && (img.height || img.naturalHeight)) || 1;
+
+        const aspect = imgWidth / imgHeight;
+        const isLandscape = aspect >= 1;
+
+        const width = isLandscape ? maxSide : maxSide * aspect;
+        const height = isLandscape ? maxSide / aspect : maxSide;
+        const depth = 0.02;
+
+        const geometry = new THREE.BoxGeometry(width, height, depth);
+        const material = new THREE.MeshPhongMaterial({
+          map: texture,
+          side: THREE.FrontSide
+        });
+
+        const imageBox = new THREE.Mesh(geometry, material);
+        imageBox.position.set(0, 0, 0);
+
+        // Add click detection if onClick is provided
+        if (onClick) {
+          imageBox.userData = {
+            isClickable: true,
+            onClick: onClick
           };
-          
-          requestAnimationFrame(animate);
+        }
+
+        // Border slightly larger than image
+        const borderThickness = 0.005;
+        const borderMargin = 0.01;
+        const borderGeometry = new THREE.BoxGeometry(
+          width + borderMargin,
+          height + borderMargin,
+          borderThickness
+        );
+        const borderMaterial = new THREE.MeshPhongMaterial({
+          color: 0x888888,
+          side: THREE.FrontSide,
+          transparent: true,
+          opacity: 0.9
+        });
+
+        const borderBox = new THREE.Mesh(borderGeometry, borderMaterial);
+        borderBox.position.set(0, 0, -depth / 2 - 0.001);
+
+        // Close button in the top-left corner
+        const closeButtonTexture = textureLoader.load('/images/x_button.svg');
+        const buttonSize = 0.03;
+        const closeButtonGeometry = new THREE.PlaneGeometry(buttonSize, buttonSize);
+        const closeButtonMaterial = new THREE.MeshPhongMaterial({
+          map: closeButtonTexture,
+          side: THREE.FrontSide,
+          transparent: true
+        });
+
+        const closeButton = new THREE.Mesh(closeButtonGeometry, closeButtonMaterial);
+        const buttonMargin = 0.01;
+        closeButton.position.set(
+          -width / 2 + buttonSize / 2 + buttonMargin,
+          height / 2 - buttonSize / 2 - buttonMargin,
+          depth / 2 + 0.0015
+        );
+        closeButton.userData = {
+          isClickable: true,
+          onClick: () => {
+            console.log('Close button clicked');
+
+            // Animate the close with a smooth scale-down animation
+            const animateClose = () => {
+              const startTime = Date.now();
+              const duration = 200;
+
+              const animate = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                const easeInCubic = Math.pow(progress, 3);
+                const scale = 1 - easeInCubic;
+
+                imageGroup.scale.set(scale, scale, scale);
+
+                if (progress < 1) {
+                  requestAnimationFrame(animate);
+                } else {
+                  removeCurrentImageBox();
+                }
+              };
+
+              requestAnimationFrame(animate);
+            };
+
+            // Start the close animation
+            animateClose();
+          }
         };
-        
-        // Start the close animation
-        animateClose();
+
+        // Add all elements to the group
+        imageGroup.add(borderBox);
+        imageGroup.add(imageBox);
+        imageGroup.add(closeButton);
+      },
+      undefined,
+      (err) => {
+        console.error('Failed to load image texture:', err);
       }
-    };
-    
-    // Add all elements to the group
-    imageGroup.add(borderBox); // Add border second (behind image)
-    imageGroup.add(imageBox);
-    imageGroup.add(closeButton);
+    );
     
     // Add the group to the scene
     scene.add(imageGroup);
@@ -264,37 +272,63 @@ const TalkingHeadDemo = forwardRef((props, ref) => {
           vdurations: processedVisemes.durations,
         });
 
+        // Compute cut indices to reveal original text progressively as words complete
+        const cutIndices = (() => {
+          const indices = [];
+          let pos = 0;
+          const escapeForRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          for (const token of words) {
+            const pattern = escapeForRegex(token).replace(/\\\./g, "\\.\\s*");
+            const re = new RegExp(pattern, "i");
+            const slice = text.slice(pos);
+            const m = slice.match(re);
+            if (m && m.index !== undefined) {
+              const end = pos + m.index + m[0].length;
+              indices.push(end);
+              pos = end;
+            } else {
+              const fallback = slice.search(/[\s.,!?;:]/);
+              const end = fallback >= 0 ? pos + fallback + 1 : text.length;
+              indices.push(end);
+              pos = end;
+            }
+          }
+          for (let i = 1; i < indices.length; i++) {
+            if (indices[i] < indices[i-1]) indices[i] = indices[i-1];
+          }
+          return indices.map(i => Math.min(i, text.length));
+        })();
 
-        // Handle link detection - show image and play gesture when each link is actually spoken
+        // Handle link detection - show image and play gesture exactly when phrase is reached
         detectedLinks.forEach(link => {
-          const delayMs = link.startTime; // Already in milliseconds from the TTS data
-          
+          // Find the first word index whose cumulative cut index passes the phrase start
+          const wordIdx = cutIndices.findIndex(ci => ci >= (link.charStart || 0));
+          const safeWordIdx = wordIdx >= 0 ? Math.min(wordIdx, wtimes.length - 1) : 0;
+          const delayMs = wtimes[safeWordIdx] || 0;
+
           setTimeout(() => {
-            // Clear any existing image box first
             removeCurrentImageBox();
-            
-            // Skip if there is no image defined for this link mapping
+
             if (!link?.linkData || !link.linkData.image) {
               return;
             }
 
-            // Play present gesture when link is mentioned
             if (headRef.current) {
               headRef.current.playGesture('present', 2, false, 1000);
             }
 
-            // Show the appropriate image for the link
             addImageRectangle(link.linkData.image, { x: 0, y: 1.3, z: 0.4 }, () => {
               window.open(link.linkData.url, '_blank');
             });
-          }, delayMs); // Use the delay directly
+          }, delayMs);
         });
 
-        // 👇 Fire callback back to ChatUI
+        // callback back to ChatUI with partialText slices
         if (props.onWord) {
           words.forEach((word, i) => {
             setTimeout(() => {
-              props.onWord(word, i, { isLastWord: i === words.length - 1 });
+              const partialText = text.slice(0, cutIndices[Math.min(i, cutIndices.length - 1)]);
+              props.onWord(word, i, { isLastWord: i === words.length - 1, partialText });
             }, wtimes[i]); // use real timing from ElevenLabs
           });
         }

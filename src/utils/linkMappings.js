@@ -7,7 +7,8 @@ export const linkMappings = {
   'matthewp@uwaterloo.ca': { url: 'mailto:matthewp@uwaterloo.ca'},
   'Schulich Leader Scholarship': { url: 'https://schulichleaders.com/', image: '/images/schulichleaders.png' },
   '4Sight': { url: 'https://github.com/justinwuzijin/eye-tester-app', image: '/images/4sight.png' },
-  'Project WhyFi': {url: 'https://projectwhyfi.ca/', image: '/images/projectwhyfi.png'}
+  'Project WhyFi': {url: 'https://projectwhyfi.ca/', image: '/images/projectwhyfi.png'},
+  'my resume': { url: '/resume/resume.pdf', image: '/images/resume.png' }  
 };
 
 export function convertPhrasesToLinks(text) {

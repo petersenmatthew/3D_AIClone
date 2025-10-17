@@ -7,20 +7,7 @@ import { elevenLabsVoices } from "../utils/elevenlabsVoices.js";
 import { convertPhrasesToLinks } from "../utils/linkMappings.js";
 import LinkPreviewRenderer from "./LinkPreviewRenderer.js";
 import { motion } from "motion/react"; 
-// ✅ Helper: append tokens without extra space before punctuation
-function appendToken(existing, token) {
-  const noSpaceBefore = [".", ",", "!", "?", ":", ";"];
-  
-  if (noSpaceBefore.includes(token)) {
-    return existing + token;
-  } 
-  // If previous ends with @, stick username directly after
-  if (existing.endsWith("@")) {
-    return existing + token;
-  }
-  return existing ? existing + " " + token : token;
-  
-}
+
 
 export default function ChatUI() {
   const [messages, setMessages] = useState([]);
@@ -593,9 +580,9 @@ export default function ChatUI() {
                     setMessages(prev => {
                       const last = prev[prev.length - 1];
                       if (last && last.isBuilding) {
-                        const newText = appendToken(last?.text || "", word);
+                        const newText = info?.partialText ?? (last?.text || "");
 
-                        // ✅ Convert phrases live
+                        // ✅ Convert phrases live on partial original text
                         const linkedText = convertPhrasesToLinks(newText);
 
                         // If this is the last word, mark as complete and reset generating state

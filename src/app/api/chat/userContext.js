@@ -71,7 +71,7 @@ Personal Info:
 Education:
 - University of Waterloo (Expected Graduation: April 2030)
   - Bachelor of Applied Science in Systems Design Engineering
-  - Schulich Leaders Scholarship ($120,000) - Canada's most coveted STEM scholarship
+  - Schulich Leader Scholarship ($120,000) - Canada's most coveted STEM scholarship
   - Relevant Courses:
     - Introduction to Design (SYDE 161): User-centered design principles
     - Digital Computation (SYDE 121): Programming fundamentals

@@ -48,8 +48,8 @@ export default function LinkPreviewRenderer({ text, className = "" }) {
       const isHttp = /^https?:/i.test(link.href);
       const isMailto = /^mailto:/i.test(link.href);
       const imageForLink = getImageForUrl(link.href);
-      // For non-http links (e.g., mailto) or when no image mapping exists, render a normal anchor without preview
-      if (!isHttp || !imageForLink) {
+      // Only show preview if there's an image available
+      if (!imageForLink) {
         return (
           <a
             key={`link-${index}`}
