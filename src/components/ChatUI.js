@@ -587,11 +587,11 @@ export default function ChatUI() {
 
                         // If this is the last word, mark as complete and reset generating state
                         if (info?.isLastWord) {
-                          console.log('Avatar finished speaking, resetting generating state');
+                          // console.log('Avatar finished speaking, resetting generating state');
                           setIsGenerating(false);
                           // Mark avatar as done speaking
                           isAvatarSpeakingRef.current = false;
-                          console.log('Avatar finished speaking');
+                          // console.log('Avatar finished speaking');
                           
                           // In conversation mode, restart recording
                           if (conversationModeRef.current && !isRecordingRef.current) {
